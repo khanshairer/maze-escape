@@ -1,0 +1,11 @@
+Model Information:
+* title:	Downloadable Otodus megalodon
+* source:	https://sketchfab.com/3d-models/downloadable-otodus-megalodon-77127264e0334e75803660d33b4335ee
+* author:	Major (https://sketchfab.com/majorgalah)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Downloadable Otodus megalodon" (https://sketchfab.com/3d-models/downloadable-otodus-megalodon-77127264e0334e75803660d33b4335ee) by Major (https://sketchfab.com/majorgalah) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

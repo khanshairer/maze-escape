@@ -1,0 +1,11 @@
+Model Information:
+* title:	Killer Whale
+* source:	https://sketchfab.com/3d-models/killer-whale-63b680d7e58f463a9868ed7bf163094a
+* author:	Abner Wu (https://sketchfab.com/dashdu)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Killer Whale" (https://sketchfab.com/3d-models/killer-whale-63b680d7e58f463a9868ed7bf163094a) by Abner Wu (https://sketchfab.com/dashdu) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

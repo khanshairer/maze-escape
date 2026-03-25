@@ -1,0 +1,11 @@
+Model Information:
+* title:	Wooden Boat Remake
+* source:	https://sketchfab.com/3d-models/wooden-boat-remake-a6b2312774ee4caca96519b44c3143d1
+* author:	Mantas Stankaitis (https://sketchfab.com/mansta9)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Wooden Boat Remake" (https://sketchfab.com/3d-models/wooden-boat-remake-a6b2312774ee4caca96519b44c3143d1) by Mantas Stankaitis (https://sketchfab.com/mansta9) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

@@ -1,0 +1,11 @@
+Model Information:
+* title:	Pseudotropheus Demasoni fish
+* source:	https://sketchfab.com/3d-models/pseudotropheus-demasoni-fish-f7f3facad8514167b410be9d60b4d596
+* author:	Ra_in_coat (https://sketchfab.com/ra_in_coat)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Pseudotropheus Demasoni fish" (https://sketchfab.com/3d-models/pseudotropheus-demasoni-fish-f7f3facad8514167b410be9d60b4d596) by Ra_in_coat (https://sketchfab.com/ra_in_coat) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

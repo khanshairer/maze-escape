@@ -1,0 +1,11 @@
+Model Information:
+* title:	Traditional Bangladeshi Boat
+* source:	https://sketchfab.com/3d-models/traditional-bangladeshi-boat-45ab977c53aa44c3b9c81052dcf19b57
+* author:	Zamir Uddin (https://sketchfab.com/xamir)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Traditional Bangladeshi Boat" (https://sketchfab.com/3d-models/traditional-bangladeshi-boat-45ab977c53aa44c3b9c81052dcf19b57) by Zamir Uddin (https://sketchfab.com/xamir) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
