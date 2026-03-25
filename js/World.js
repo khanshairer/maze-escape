@@ -28,8 +28,15 @@ export class World {
     this.npcs = [];
     this.mixers = [];
 
-    // Main character animation mixer
+    // Main character animation mixer and actions
     this.mainCharacterMixer = null;
+    this.mainCharacterActions = {};   // stores AnimationAction objects by index/name
+    this.currentMainAction = null;    // currently playing action
+
+    // Movement speed (units per second)
+    this.moveSpeed = 5.0;
+    // Steering force limit
+    this.maxForce = 10.0;
 
     // Add loading tracking
     this.modelsLoading = 0;
@@ -46,10 +53,11 @@ export class World {
     this.tileMapRenderer = new TileMapRenderer(this.map);
     this.tileMapRenderer.render(this.scene);
 
-    // Create main character on the ground
+    // Create main character on the ground – set topSpeed so it respects max speed
     this.main_character = new DynamicEntity({
       position: new THREE.Vector3(0, 0, 0),
       velocity: new THREE.Vector3(0, 0, 0),
+      topSpeed: this.moveSpeed,      // ensure max speed is enforced
       color: 0x3333ff,
       scale: new THREE.Vector3(1, 1, 1)
     });
@@ -80,6 +88,7 @@ export class World {
       '../public/officer_with_gun/scene.gltf',
       (gltf) => {
         const model = gltf.scene;
+        console.log('Main character model loaded:', gltf.scene);
 
         // Remove temporary visuals
         while (this.main_character.mesh.children.length > 0) {
@@ -101,9 +110,20 @@ export class World {
         // Handle animations if present
         if (gltf.animations && gltf.animations.length > 0) {
           const mixer = new THREE.AnimationMixer(model);
-          const action = mixer.clipAction(gltf.animations[0]);
-          action.play();
           this.mainCharacterMixer = mixer;
+
+          // Store all animation actions
+          gltf.animations.forEach((clip, idx) => {
+            const action = mixer.clipAction(clip);
+            this.mainCharacterActions[idx] = action;
+          });
+
+          // Assume animation 0 is idle, 1 is walk (adjust indices as needed)
+          const idleAction = this.mainCharacterActions[0];
+          if (idleAction) {
+            idleAction.play();
+            this.currentMainAction = idleAction;
+          }
         }
 
         // Update color (optional)
@@ -123,7 +143,7 @@ export class World {
       }
     );
 
-    // Add main character to world (replace the erroneous npc2 line)
+    // Add main character to world
     this.addEntityToWorld(this.main_character);
 
     // Create ocean wave with animations
@@ -491,9 +511,69 @@ export class World {
     this.entities.push(entity);
   }
 
+  // ----- Movement and animation methods (steering based) -----
+
+  // Update main character movement using steering behaviours
+    // Update main character movement using steering behaviours
+    // Update main character movement using steering behaviours
+  updateMainCharacter(dt) {
+    const input = this.inputHandler;
+    if (!input) return;
+
+    // Compute desired movement direction in world space
+    let desiredVelocity = input.getForce(this.moveSpeed);
+
+    // Steering force = (desired - current) clamped to maxForce
+    const currentVel = this.main_character.velocity;
+    const steering = desiredVelocity.clone().sub(currentVel);
+    steering.clampLength(0, this.maxForce);
+
+    // Apply the steering force to the character
+    this.main_character.applyForce(steering);
+
+    // Debug logging (once per second)
+    if (!this.logCounter) this.logCounter = 0;
+    this.logCounter++;
+    if (this.logCounter >= 60) {
+      this.logCounter = 0;
+      console.log("[DEBUG] Input:", {
+        w: input.keys.w,
+        a: input.keys.a,
+        s: input.keys.s,
+        d: input.keys.d
+      });
+      console.log("[DEBUG] desiredVelocity:", desiredVelocity);
+      console.log("[DEBUG] currentVelocity:", currentVel);
+      console.log("[DEBUG] steering force:", steering);
+      console.log("[DEBUG] position:", this.main_character.position);
+    }
+
+    // Animation switching based on speed
+    const isMoving = desiredVelocity.length() > 0.1;
+    if (isMoving) {
+      const walkAction = this.mainCharacterActions[3];
+      const idleAction = this.mainCharacterActions[0];
+      if (walkAction && this.currentMainAction !== walkAction) {
+        if (idleAction) idleAction.fadeOut(0.2);
+        walkAction.reset().fadeIn(0.2).play();
+        this.currentMainAction = walkAction;
+      }
+    } else {
+      const idleAction = this.mainCharacterActions[0];
+      const walkAction = this.mainCharacterActions[1];
+      if (idleAction && this.currentMainAction !== idleAction) {
+        if (walkAction) walkAction.fadeOut(0.2);
+        idleAction.reset().fadeIn(0.2).play();
+        this.currentMainAction = idleAction;
+      }
+    }
+  }
   // Update our world
   update() {
     let dt = this.clock.getDelta();
+
+    // Update main character movement and animation
+    this.updateMainCharacter(dt);
 
     // Update main character animation mixer if present
     if (this.mainCharacterMixer) {
@@ -505,13 +585,19 @@ export class World {
       mixer.update(dt);
     }
 
-    // Update custom ocean wave animation if it exists
-    
-    // Update all entities
+    // Update all entities (this includes the main character)
     for (let e of this.entities) {
       if (e.update) {
         e.update(dt, this.map);
       }
+    }
+
+    // Final position logging (once per second)
+    if (!this.finalLogCounter) this.finalLogCounter = 0;
+    this.finalLogCounter++;
+    if (this.finalLogCounter >= 60) {
+      this.finalLogCounter = 0;
+      console.log("[DEBUG] After update - position:", this.main_character.position, "velocity:", this.main_character.velocity);
     }
   }
 
