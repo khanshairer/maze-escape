@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import * as Setup from './setup.js';
 import { InputHandler } from './input/InputHandler.js';
 import { TileMap } from './maps/TileMap.js';
+import { Tile } from './maps/Tile.js';
 import { TileMapRenderer } from './renderers/TileMapRenderer.js';
 import { DynamicEntity } from './entities/DynamicEntity.js';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
@@ -42,28 +43,79 @@ export class World {
     this.modelsLoading = 0;
     this.modelsLoaded = 0;
     this.loadingComplete = false;
+
+    // hallway proxy map (free movement inside hallway)
+    this.hallwayMap = {
+      handleCollisions: (entity) => entity.position.clone()
+    };
   }
 
   // Initialize objects in our world
   init() {
+    // ----- create two mazes -----
     this.map = new TileMap(2);
+    this.map2 = new TileMap(2);
+
     Setup.createLight(this.scene);
     Setup.showHelpers(this.scene, this.camera, this.renderer, this.map);
 
+    // gap between the two mazes
+    this.mazeGap = 6;
+
+    // full width of one maze in world units
+    this.mapWorldWidth = this.map.cols * this.map.tileSize;
+
+    // offset for second maze
+    this.map2Offset = new THREE.Vector3(this.mapWorldWidth + this.mazeGap, 0, 0);
+
+    // ----- create hallway connection between mazes -----
+    let preferredRow = Math.floor(this.map.rows / 2);
+    let row1 = this.findClosestWalkableRow(this.map, preferredRow, 'right');
+    let row2 = this.findClosestWalkableRow(this.map2, preferredRow, 'left');
+
+    // use same row if possible
+    this.connectionRow = row1;
+    if (this.map2.grid[this.connectionRow] && this.map2.grid[this.connectionRow][1].isWalkable()) {
+      row2 = this.connectionRow;
+    } else {
+      this.connectionRow = row2;
+      row1 = this.findClosestWalkableRow(this.map, this.connectionRow, 'right');
+    }
+
+    this.openMazeSide(this.map, row1, 'right');
+    this.openMazeSide(this.map2, row2, 'left');
+
+    this.map.walkableTiles = this.map.grid.flat().filter(tile => tile.isWalkable());
+    this.map2.walkableTiles = this.map2.grid.flat().filter(tile => tile.isWalkable());
+
+    // ----- render first maze in its own group -----
+    this.mazeGroup1 = new THREE.Group();
+    this.scene.add(this.mazeGroup1);
+
     this.tileMapRenderer = new TileMapRenderer(this.map);
-    this.tileMapRenderer.render(this.scene);
+    this.tileMapRenderer.render(this.mazeGroup1);
+
+    // ----- render second maze in its own group -----
+    this.mazeGroup2 = new THREE.Group();
+    this.mazeGroup2.position.copy(this.map2Offset);
+    this.scene.add(this.mazeGroup2);
+
+    this.tileMapRenderer2 = new TileMapRenderer(this.map2);
+    this.tileMapRenderer2.render(this.mazeGroup2);
+
+    // ----- render hallway between them -----
+    this.createHallway(row1, row2);
 
     // Create main character on the ground – set topSpeed so it respects max speed
     this.main_character = new DynamicEntity({
       position: new THREE.Vector3(0, 0, 0),
       velocity: new THREE.Vector3(0, 0, 0),
-      topSpeed: this.moveSpeed,      // ensure max speed is enforced
+      topSpeed: this.moveSpeed,
       color: 0x3333ff,
       scale: new THREE.Vector3(1, 1, 1)
     });
 
     // ----- Load officer_with_gun model for main character -----
-    // Add temporary loading visuals (colored cube + spinning ring)
     const tempCubeGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
     const tempCubeMat = new THREE.MeshStandardMaterial({
       color: 0x33aaff,
@@ -85,40 +137,33 @@ export class World {
 
     const loader = new GLTFLoader();
     loader.load(
-      '../public/officer_with_gun/scene.gltf',
+      '/officer_with_gun/scene.gltf',
       (gltf) => {
         const model = gltf.scene;
         console.log('Main character model loaded:', gltf.scene);
 
-        // Remove temporary visuals
         while (this.main_character.mesh.children.length > 0) {
           this.main_character.mesh.remove(this.main_character.mesh.children[0]);
         }
 
-        // Scale and position the model
-        model.scale.set(1.8, 1.8, 1.8); // Adjust scale as needed
+        model.scale.set(1.8, 1.8, 1.8);
         model.position.set(0, -0.5, 0);
 
-        // Center vertically (bottom at ground level)
         const box = new THREE.Box3().setFromObject(model);
         model.position.y = -box.min.y;
 
-        // Add model to character's mesh
         this.main_character.mesh.add(model);
-        this.main_character.model = model; // store for reference
+        this.main_character.model = model;
 
-        // Handle animations if present
         if (gltf.animations && gltf.animations.length > 0) {
           const mixer = new THREE.AnimationMixer(model);
           this.mainCharacterMixer = mixer;
 
-          // Store all animation actions
           gltf.animations.forEach((clip, idx) => {
             const action = mixer.clipAction(clip);
             this.mainCharacterActions[idx] = action;
           });
 
-          // Assume animation 0 is idle, 1 is walk (adjust indices as needed)
           const idleAction = this.mainCharacterActions[0];
           if (idleAction) {
             idleAction.play();
@@ -126,13 +171,11 @@ export class World {
           }
         }
 
-        // Update color (optional)
         this.main_character.color = 0x44aaff;
       },
-      undefined, // onProgress (optional)
+      undefined,
       (error) => {
         console.error('Error loading officer_with_gun model:', error);
-        // Keep temporary cube but make it red to indicate error
         if (this.main_character.mesh.children[0]) {
           this.main_character.mesh.children[0].material.color.setHex(0xff0000);
           this.main_character.mesh.children[0].material.transparent = false;
@@ -143,20 +186,261 @@ export class World {
       }
     );
 
-    // Add main character to world
     this.addEntityToWorld(this.main_character);
 
-    // Create ocean wave with animations
-    //this.createOceanWave();
-
-    // debug arrow visuals for walkable tiles
+    // first maze content
     this.createGoals(5);
-
-    // Create NPCs with loading feedback
     this.createNPCs(10);
 
-    // Add loading indicator
+    // second maze content
+    this.createGoalsForMap(this.map2, this.map2Offset, 5);
+    this.createNPCsForMap(this.map2, this.map2Offset, 10);
+
     this.createLoadingIndicator();
+  }
+
+  findClosestWalkableRow(map, preferredRow, side = 'right') {
+    const col = side === 'right' ? map.cols - 2 : 1;
+
+    for (let offset = 0; offset < map.rows; offset++) {
+      const r1 = preferredRow + offset;
+      const r2 = preferredRow - offset;
+
+      if (r1 >= 1 && r1 < map.rows - 1 && map.grid[r1][col].isWalkable()) return r1;
+      if (r2 >= 1 && r2 < map.rows - 1 && map.grid[r2][col].isWalkable()) return r2;
+    }
+
+    return Math.max(1, Math.min(map.rows - 2, preferredRow));
+  }
+
+  openMazeSide(map, row, side = 'right') {
+    if (side === 'right') {
+      map.grid[row][map.cols - 1].type = Tile.Type.EasyTerrain;
+      map.grid[row][map.cols - 2].type = Tile.Type.EasyTerrain;
+    } else {
+      map.grid[row][0].type = Tile.Type.EasyTerrain;
+      map.grid[row][1].type = Tile.Type.EasyTerrain;
+    }
+  }
+
+  createHallway(row1, row2) {
+    const startTile1 = this.map.grid[row1][this.map.cols - 1];
+    const startTile2 = this.map2.grid[row2][0];
+
+    const p1 = this.map.localize(startTile1);
+    const p2 = this.map2.localize(startTile2).clone().add(this.map2Offset);
+
+    const hallwayY = 0.02;
+    const hallwayThickness = 0.05;
+    const hallwayDepth = this.map.tileSize;
+
+    const straightCenterX = (p1.x + p2.x) / 2;
+    const straightCenterZ = p1.z;
+    const straightWidth = Math.abs(p2.x - p1.x);
+
+    const straightGeo = new THREE.BoxGeometry(straightWidth, hallwayThickness, hallwayDepth);
+    const straightMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0 });
+    const straightHall = new THREE.Mesh(straightGeo, straightMat);
+    straightHall.position.set(straightCenterX, hallwayY, straightCenterZ);
+    this.scene.add(straightHall);
+
+    this.hallwayMesh = straightHall;
+
+    this.hallwayBounds = {
+      minX: Math.min(p1.x, p2.x),
+      maxX: Math.max(p1.x, p2.x),
+      minZ: p1.z - hallwayDepth / 2,
+      maxZ: p1.z + hallwayDepth / 2
+    };
+
+    // if the doorway rows are different, add a vertical connector near maze 2
+    if (p1.z !== p2.z) {
+      const verticalDepth = Math.abs(p2.z - p1.z) + hallwayDepth;
+      const verticalCenterZ = (p1.z + p2.z) / 2;
+
+      const verticalGeo = new THREE.BoxGeometry(this.map.tileSize, hallwayThickness, verticalDepth);
+      const verticalMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0 });
+      const verticalHall = new THREE.Mesh(verticalGeo, verticalMat);
+      verticalHall.position.set(p2.x, hallwayY, verticalCenterZ);
+      this.scene.add(verticalHall);
+
+      this.hallwayBounds.minX = Math.min(this.hallwayBounds.minX, p2.x - this.map.tileSize / 2);
+      this.hallwayBounds.maxX = Math.max(this.hallwayBounds.maxX, p2.x + this.map.tileSize / 2);
+      this.hallwayBounds.minZ = Math.min(this.hallwayBounds.minZ, verticalCenterZ - verticalDepth / 2);
+      this.hallwayBounds.maxZ = Math.max(this.hallwayBounds.maxZ, verticalCenterZ + verticalDepth / 2);
+    }
+  }
+
+  isInHallway(position) {
+    if (!this.hallwayBounds) return false;
+
+    return (
+      position.x >= this.hallwayBounds.minX &&
+      position.x <= this.hallwayBounds.maxX &&
+      position.z >= this.hallwayBounds.minZ &&
+      position.z <= this.hallwayBounds.maxZ
+    );
+  }
+
+  getMapForPosition(position) {
+    if (this.isInHallway(position)) {
+      return this.hallwayMap;
+    }
+
+    return position.x >= this.map2Offset.x / 2 ? this.map2 : this.map;
+  }
+
+  // for second maze, we need to offset the positions of goals and NPCs
+  createGoalsForMap(map, offset, numGoals = 5) {
+    let goalCount = 0;
+    let maxAttempts = 1000;
+    let attempts = 0;
+
+    while (goalCount < numGoals && attempts < maxAttempts) {
+      attempts++;
+
+      let randomTile =
+        map.walkableTiles[Math.floor(Math.random() * map.walkableTiles.length)];
+
+      let position = map.localize(randomTile).clone().add(offset);
+
+      const tempGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+      const tempMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffdd44,
+        emissive: 0x442200,
+        transparent: true,
+        opacity: 0.8
+      });
+      const tempMarker = new THREE.Mesh(tempGeometry, tempMaterial);
+      tempMarker.position.copy(position);
+      tempMarker.position.y = 1;
+      this.scene.add(tempMarker);
+
+      const loader = new GLTFLoader();
+      loader.load(
+        '/pier/scene.gltf',
+        (gltf) => {
+          const model = gltf.scene;
+          this.scene.remove(tempMarker);
+
+          const box = new THREE.Box3().setFromObject(model);
+          const center = new THREE.Vector3();
+          box.getCenter(center);
+          const size = new THREE.Vector3();
+          box.getSize(size);
+
+          const pierGroup = new THREE.Group();
+          model.position.copy(center.clone().negate());
+          pierGroup.add(model);
+
+          pierGroup.scale.set(0.3, 0.5, 0.3);
+          pierGroup.position.copy(position);
+
+          const scaledHeight = size.y * 0.5;
+          pierGroup.position.y = scaledHeight / 2;
+          pierGroup.rotation.y = Math.random() * Math.PI * 2;
+
+          this.scene.add(pierGroup);
+        },
+        undefined,
+        () => {}
+      );
+
+      goalCount++;
+    }
+  }
+
+  // for second maze ....create NPCs with offset
+  createNPCsForMap(map, offset, numNPCs = 10) {
+    this.modelsLoading += numNPCs;
+
+    for (let i = 0; i < numNPCs; i++) {
+      let randomTile =
+        map.walkableTiles[Math.floor(Math.random() * map.walkableTiles.length)];
+
+      let position = map.localize(randomTile).clone().add(offset);
+
+      let npc = new DynamicEntity({
+        position: position,
+        velocity: new THREE.Vector3(0, 0, 0),
+        color: 0xffaa33,
+        scale: new THREE.Vector3(1, 1, 1)
+      });
+
+      npc.mesh.rotation.y = Math.random() * Math.PI * 2;
+      npc.boatLoaded = false;
+
+      const tempGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+      const tempMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffaa33,
+        emissive: 0x442200,
+        transparent: true,
+        opacity: 0.7
+      });
+      const tempCube = new THREE.Mesh(tempGeometry, tempMaterial);
+      tempCube.position.set(0, 0.75, 0);
+      npc.mesh.add(tempCube);
+
+      const indicatorGeo = new THREE.ConeGeometry(0.3, 0.8, 8);
+      const indicatorMat = new THREE.MeshStandardMaterial({ color: 0xffff00 });
+      const indicator = new THREE.Mesh(indicatorGeo, indicatorMat);
+      indicator.position.set(0, 1.8, 0);
+      indicator.userData = { spinSpeed: 0.1 };
+      npc.mesh.add(indicator);
+      npc.loadingIndicator = indicator;
+
+      const loader = new GLTFLoader();
+      loader.load(
+        '/animated_drone/scene.gltf',
+        (gltf) => {
+          const model = gltf.scene;
+          const currentRotation = npc.mesh.rotation.y;
+
+          while (npc.mesh.children.length > 0) {
+            npc.mesh.remove(npc.mesh.children[0]);
+          }
+
+          model.scale.set(10, 10, 10);
+          model.position.set(0, -0.5, 0);
+
+          const box = new THREE.Box3().setFromObject(model);
+          model.position.y = -box.min.y;
+          model.userData.forwardAxis = 'x';
+
+          npc.mesh.add(model);
+          npc.boatModel = model;
+          npc.boatLoaded = true;
+          npc.color = 0xff3333;
+          npc.mesh.rotation.y = currentRotation;
+
+          if (gltf.animations && gltf.animations.length > 0) {
+            const mixer = new THREE.AnimationMixer(model);
+            const action = mixer.clipAction(gltf.animations[0]);
+            action.play();
+            npc.mixer = mixer;
+            this.mixers.push(mixer);
+          }
+
+          this.modelsLoaded++;
+          this.updateLoadingIndicator();
+        },
+        undefined,
+        () => {
+          if (npc.mesh.children[0]) {
+            npc.mesh.children[0].material.color.setHex(0xff0000);
+          }
+
+          npc.boatLoaded = true;
+          npc.loadError = true;
+
+          this.modelsLoaded++;
+          this.updateLoadingIndicator();
+        }
+      );
+
+      this.npcs.push(npc);
+      this.addEntityToWorld(npc);
+    }
   }
 
   // Create a loading indicator in the scene
@@ -184,7 +468,9 @@ export class World {
       return;
     }
 
-    const progress = (this.modelsLoaded / this.modelsLoading) * 100;
+    const progress = this.modelsLoading > 0
+      ? (this.modelsLoaded / this.modelsLoading) * 100
+      : 0;
 
     // Update canvas text
     const canvas = document.createElement('canvas');
@@ -220,7 +506,6 @@ export class World {
   // create goals in the world with pier models
   // create goals in the world with pier models
   createGoals(numGoals = 5) {
-
     var goalCount = 0;
     var maxAttempts = 1000;
     var attempts = 0;
@@ -278,9 +563,8 @@ export class World {
         // Load pier model
         const loader = new GLTFLoader();
         loader.load(
-          '../public/pier/scene.gltf',
+          '/pier/scene.gltf',
           (gltf) => {
-
             const model = gltf.scene;
 
             // Remove temporary marker
@@ -307,9 +591,8 @@ export class World {
             pierGroup.position.copy(position);
 
             // Adjust Y position to sit on ground
-            // The bottom of the model should be at ground level
             const scaledHeight = size.y * 0.5;
-            pierGroup.position.y = scaledHeight / 2; // Half height above ground
+            pierGroup.position.y = scaledHeight / 2;
 
             // Add random rotation for variety
             pierGroup.rotation.y = Math.random() * Math.PI * 2;
@@ -343,7 +626,6 @@ export class World {
             // Optional progress
           },
           (error) => {
-
             // Keep temporary marker as fallback but make it solid
             tempMarker.material.wireframe = false;
             tempMarker.material.color.setHex(0xffaa00);
@@ -370,7 +652,6 @@ export class World {
 
   // create npcs with visual loading feedback
   createNPCs(numNPCs = 10) {
-
     this.modelsLoading = numNPCs;
     this.modelsLoaded = 0;
 
@@ -390,7 +671,6 @@ export class World {
       });
 
       // Set initial rotation to face a random direction
-      // This prevents the default cone from facing the wrong way
       npc.mesh.rotation.y = Math.random() * Math.PI * 2;
 
       // Add a flag to indicate if boat is loaded
@@ -422,15 +702,11 @@ export class World {
       // Load boat model
       const loader = new GLTFLoader();
       loader.load(
-        '../public/animated_drone/scene.gltf', // Updated path
+        '/animated_drone/scene.gltf',
         (gltf) => {
-
           const model = gltf.scene;
           console.log('Boat model loaded:', gltf.scene);
 
-          // Store position before clearing
-          const npcPosition = npc.position.clone();
-          // Store current rotation
           const currentRotation = npc.mesh.rotation.y;
 
           // Remove temporary loading visuals
@@ -446,10 +722,7 @@ export class World {
           const box = new THREE.Box3().setFromObject(model);
           model.position.y = -box.min.y;
 
-          // Store the forward direction for rotation helper
-          // Try different values if the boat faces wrong direction:
-          // 'x' for boats facing +X, '-x' for -X, 'z' for +Z, '-z' for -Z
-          model.userData.forwardAxis = 'x'; // Try 'x' first for wooden_boat
+          model.userData.forwardAxis = 'x';
 
           // Add the boat model WITHOUT rotating it first
           npc.mesh.add(model);
@@ -485,7 +758,6 @@ export class World {
           // Optional: show per-NPC progress
         },
         (error) => {
-
           // Make the loading cube red to show error
           if (npc.mesh.children[0]) {
             npc.mesh.children[0].material.color.setHex(0xff0000);
@@ -514,8 +786,6 @@ export class World {
   // ----- Movement and animation methods (steering based) -----
 
   // Update main character movement using steering behaviours
-    // Update main character movement using steering behaviours
-    // Update main character movement using steering behaviours
   updateMainCharacter(dt) {
     const input = this.inputHandler;
     if (!input) return;
@@ -536,16 +806,16 @@ export class World {
     this.logCounter++;
     if (this.logCounter >= 60) {
       this.logCounter = 0;
-      console.log("[DEBUG] Input:", {
+      console.log('[DEBUG] Input:', {
         w: input.keys.w,
         a: input.keys.a,
         s: input.keys.s,
         d: input.keys.d
       });
-      console.log("[DEBUG] desiredVelocity:", desiredVelocity);
-      console.log("[DEBUG] currentVelocity:", currentVel);
-      console.log("[DEBUG] steering force:", steering);
-      console.log("[DEBUG] position:", this.main_character.position);
+      console.log('[DEBUG] desiredVelocity:', desiredVelocity);
+      console.log('[DEBUG] currentVelocity:', currentVel);
+      console.log('[DEBUG] steering force:', steering);
+      console.log('[DEBUG] position:', this.main_character.position);
     }
 
     // Animation switching based on speed
@@ -568,6 +838,45 @@ export class World {
       }
     }
   }
+
+  updateCameraFollow() {
+  if (!this.main_character) return;
+
+  const target = this.main_character.position.clone();
+
+  // camera offset relative to player
+  const desiredPosition = target.clone().add(new THREE.Vector3(0, 18, 14));
+
+  // smooth follow
+  this.camera.position.lerp(desiredPosition, 0.08);
+
+  // always look at player
+  this.camera.lookAt(target.x, target.y, target.z);
+}
+
+// for maze 2 position update 
+getMapAdapterForPosition(position) {
+  if (this.isInHallway(position)) {
+    return this.hallwayMap;
+  }
+
+  if (position.x >= this.map2Offset.x / 2) {
+    return {
+      handleCollisions: (entity) => {
+        const fakeEntity = {
+          ...entity,
+          position: entity.position.clone().sub(this.map2Offset)
+        };
+
+        const corrected = this.map2.handleCollisions(fakeEntity);
+        return corrected.add(this.map2Offset);
+      }
+    };
+  }
+
+  return this.map;
+}
+
   // Update our world
   update() {
     let dt = this.clock.getDelta();
@@ -588,16 +897,17 @@ export class World {
     // Update all entities (this includes the main character)
     for (let e of this.entities) {
       if (e.update) {
-        e.update(dt, this.map);
-      }
+        e.update(dt, this.getMapAdapterForPosition(e.position));      }
     }
+    // Update camera to follow main character
+    this.updateCameraFollow();
 
     // Final position logging (once per second)
     if (!this.finalLogCounter) this.finalLogCounter = 0;
     this.finalLogCounter++;
     if (this.finalLogCounter >= 60) {
       this.finalLogCounter = 0;
-      console.log("[DEBUG] After update - position:", this.main_character.position, "velocity:", this.main_character.velocity);
+      console.log('[DEBUG] After update - position:', this.main_character.position, 'velocity:', this.main_character.velocity);
     }
   }
 
