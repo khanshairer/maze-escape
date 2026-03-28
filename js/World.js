@@ -6,6 +6,8 @@ import { Tile } from './maps/Tile.js';
 import { TileMapRenderer } from './renderers/TileMapRenderer.js';
 import { DynamicEntity } from './entities/DynamicEntity.js';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
+import { SteeringBehaviours } from './ai/steering/SteeringBehaviours.js';
+import { CollisionAvoidSteering } from './ai/steering/CollisionAvoidSteering.js';
 
 /**
  * World class holds all information about our game's world
@@ -114,6 +116,23 @@ export class World {
       color: 0x3333ff,
       scale: new THREE.Vector3(1, 1, 1)
     });
+
+    let attackerTile;
+let attackerPosition;
+
+do {
+  attackerTile = this.map.getRandomWalkableTile();
+  attackerPosition = this.map.localize(attackerTile);
+} while (attackerPosition.distanceTo(new THREE.Vector3(0, 0, 0)) < 6);
+
+this.ground_attacker = new DynamicEntity({
+  position: attackerPosition,
+  velocity: new THREE.Vector3(0, 0, 0),
+  color: 0x660000,
+  scale: new THREE.Vector3(1, 0.75, 1)
+});
+
+    this.addEntityToWorld(this.ground_attacker);
 
     // ----- Load officer_with_gun model for main character -----
     const tempCubeGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
@@ -876,7 +895,192 @@ getMapAdapterForPosition(position) {
 
   return this.map;
 }
+//helper for Update Ground Attacker
+getEscapeTargetFromCurrentTile(npc) {
+  const tile = this.map.quantize(npc.position);
+  const neighbours = this.map.getNeighbours(tile);
 
+  if (!neighbours || neighbours.length === 0) return null;
+
+  let bestTile = neighbours[0];
+  let bestDist = -Infinity;
+
+  for (let n of neighbours) {
+    const pos = this.map.localize(n);
+    const dist = pos.distanceTo(this.main_character.position);
+    if (dist > bestDist) {
+      bestDist = dist;
+      bestTile = n;
+    }
+  }
+
+  return this.map.localize(bestTile);
+}
+//keep the ground attacker on the ground, prevent it from escaping to maze 2, and add wander/chase/avoid behaviours
+snapEntityToWalkableTile(entity) {
+  let tile = this.map.quantize(entity.position);
+
+  if (tile && tile.isWalkable()) {
+    return;
+  }
+
+  let bestTile = null;
+  let bestDist = Infinity;
+
+  for (let walkable of this.map.walkableTiles) {
+    let pos = this.map.localize(walkable);
+    let dist = pos.distanceTo(entity.position);
+
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestTile = walkable;
+    }
+  }
+
+  if (bestTile) {
+    let safePos = this.map.localize(bestTile);
+    entity.position.x = safePos.x;
+    entity.position.z = safePos.z;
+    entity.velocity.set(0, 0, 0);
+  }
+}
+
+// add wander behaviour for ground attacker
+updateGroundAttacker() {
+  const npc = this.ground_attacker;
+  if (!npc || !this.main_character) return;
+
+  // keep attacker on ground
+  npc.position.y = 1;
+  if (npc.velocity) npc.velocity.y = 0;
+  if (npc.acceleration) npc.acceleration.y = 0;
+
+  // -------- DISTANCE TO PLAYER --------
+  let distance = npc.position.distanceTo(this.main_character.position);
+  let steer = new THREE.Vector3();
+
+  // -------- STUCK DETECTION --------
+  if (!npc.stuckFrames) npc.stuckFrames = 0;
+
+  if (npc.velocity.length() < 0.15) {
+    npc.stuckFrames++;
+  } else {
+    npc.stuckFrames = 0;
+  }
+
+  // if stuck, force escape target
+  if (npc.stuckFrames > 20) {
+    const escapeTarget = this.getEscapeTargetFromCurrentTile(npc);
+
+    if (escapeTarget) {
+      steer.add(
+        SteeringBehaviours.seek(npc, escapeTarget).multiplyScalar(2.5)
+      );
+    }
+
+    npc.stuckFrames = 0;
+  }
+  // WANDER when FAR
+  else if (distance > 10) {
+    if (!npc.wanderAngle) {
+      npc.wanderAngle = Math.random() * Math.PI * 2;
+    }
+
+    const wanderRadius = 3;
+    const wanderDistance = 4;
+    const change = 0.3;
+
+    npc.wanderAngle += (Math.random() - 0.5) * change;
+
+    let forward = npc.velocity.clone();
+    if (forward.length() === 0) {
+      forward = new THREE.Vector3(1, 0, 0);
+    }
+    forward.normalize();
+
+    let circleCenter = forward.clone().multiplyScalar(wanderDistance);
+
+    let displacement = new THREE.Vector3(
+      Math.cos(npc.wanderAngle),
+      0,
+      Math.sin(npc.wanderAngle)
+    ).multiplyScalar(wanderRadius);
+
+    steer.add(circleCenter.add(displacement));
+  }
+  // CHASE when CLOSE
+  else {
+    let targetPos = this.main_character.position.clone();
+    let seekForce = SteeringBehaviours.seek(npc, targetPos);
+    steer.add(seekForce.multiplyScalar(1.8));
+  }
+
+  // AVOID NPCs
+  for (let other of this.npcs) {
+    if (other === npc) continue;
+
+    if (other.position.x >= this.map2Offset.x / 2) continue;
+
+    const obstacle = {
+      position: other.position.clone(),
+      radius: 1.5
+    };
+
+    const avoid = CollisionAvoidSteering.round(
+      npc,
+      obstacle,
+      1.2,
+      2.5,
+      { showLine(){}, showSphere(){}, hideObjs(){} }
+    );
+
+    steer.add(avoid.multiplyScalar(2.0));
+  }
+
+  // AVOID PLAYER when very close
+  if (distance < 3) {
+    const playerObstacle = {
+      position: this.main_character.position.clone(),
+      radius: 1.5
+    };
+
+    const avoidPlayer = CollisionAvoidSteering.round(
+      npc,
+      playerObstacle,
+      0.8,
+      1.5,
+      { showLine(){}, showSphere(){}, hideObjs(){} }
+    );
+
+    steer.add(avoidPlayer.multiplyScalar(2.0));
+  }
+
+  // APPLY FORCE
+  npc.applyForce(steer);
+
+  // keep inside map 1 rectangular bounds
+  const minX = this.map.minX + 1;
+  const maxX = this.map.minX + this.map.cols * this.map.tileSize - 1;
+  const minZ = this.map.minZ + 1;
+  const maxZ = this.map.minZ + this.map.rows * this.map.tileSize - 1;
+
+  npc.position.x = THREE.MathUtils.clamp(npc.position.x, minX, maxX);
+  npc.position.z = THREE.MathUtils.clamp(npc.position.z, minZ, maxZ);
+
+  // if it crosses into hallway / maze 2, teleport back safely
+  if (npc.position.x >= this.map2Offset.x / 2) {
+    let safeTile = this.map.getRandomWalkableTile();
+    let safePos = this.map.localize(safeTile);
+    npc.position.copy(safePos);
+    npc.velocity.set(0, 0, 0);
+  }
+
+  // final correction: make sure attacker is not on obstacle tile
+  this.snapEntityToWalkableTile(npc);
+
+  // keep y fixed after snapping
+  npc.position.y = 1;
+}
   // Update our world
   update() {
     let dt = this.clock.getDelta();
@@ -893,6 +1097,9 @@ getMapAdapterForPosition(position) {
     for (let mixer of this.mixers) {
       mixer.update(dt);
     }
+
+    //updateGroundAttacker with new steering behaviours
+    this.updateGroundAttacker();
 
     // Update all entities (this includes the main character)
     for (let e of this.entities) {
