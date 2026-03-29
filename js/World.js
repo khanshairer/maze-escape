@@ -863,13 +863,13 @@ this.ground_attacker = new DynamicEntity({
 
   const target = this.main_character.position.clone();
 
-  // camera offset relative to player
-  const desiredPosition = target.clone().add(new THREE.Vector3(0, 18, 14));
+  // closer + lower camera
+  const desiredPosition = target.clone().add(new THREE.Vector3(0, 10, 8));
 
   // smooth follow
   this.camera.position.lerp(desiredPosition, 0.08);
 
-  // always look at player
+  // look at player
   this.camera.lookAt(target.x, target.y, target.z);
 }
 
