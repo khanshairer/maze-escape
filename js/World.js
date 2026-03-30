@@ -1117,7 +1117,9 @@ reset() {
     mixer.stopAllAction();
   }
   return;
-}    
+}  
+
+if(!this.main_character) return;
     let dt = this.clock.getDelta();
 
     // Update main character movement and animation
