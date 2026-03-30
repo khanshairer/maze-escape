@@ -10,19 +10,25 @@ export class InputHandler {
         this.camera = camera;
 
         // Track which WASD keys are pressed
-        this.keys = { w: false, a: false, s: false, d: false };
+        this.keys = { w: false, a: false, s: false, d: false, space: false };
 
         // Listen for key down events and mark keys as pressed
         window.addEventListener('keydown', (e) => {
             let key = e.key.toLowerCase();
-            if (key in this.keys)
+
+            if (e.code === 'Space')
+                this.keys.space = true;
+            else if (key in this.keys)
                 this.keys[key] = true;
         });
 
         // Listen for key up events and mark keys as not pressed
         window.addEventListener('keyup', (e) => {
             let key = e.key.toLowerCase();
-            if (key in this.keys)
+
+            if (e.code === 'Space')
+                this.keys.space = false;
+            else if (key in this.keys)
                 this.keys[key] = false;
         });
     

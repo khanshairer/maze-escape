@@ -6,8 +6,8 @@ import { Tile } from './maps/Tile.js';
 import { TileMapRenderer } from './renderers/TileMapRenderer.js';
 import { DynamicEntity } from './entities/DynamicEntity.js';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
-import { SteeringBehaviours } from './ai/steering/SteeringBehaviours.js';
-import { CollisionAvoidSteering } from './ai/steering/CollisionAvoidSteering.js';
+import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js';
+import { DebugVisuals } from './debug/DebugVisuals.js';
 
 /**
  * World class holds all information about our game's world
@@ -30,6 +30,7 @@ export class World {
     this.goals = [];
     this.npcs = [];
     this.mixers = [];
+    this.ground_attackers = [];
 
     // Main character animation mixer and actions
     this.mainCharacterMixer = null;
@@ -46,177 +47,195 @@ export class World {
     this.modelsLoaded = 0;
     this.loadingComplete = false;
 
+    // for jumping 
+     this.jumpVelocity = 0;
+     this.gravity = 18;
+     this.jumpStrength = 11;
+     this.isJumping = false;
+     this.groundY = 0;
     // hallway proxy map (free movement inside hallway)
     this.hallwayMap = {
       handleCollisions: (entity) => entity.position.clone()
     };
+
+    // debug visuals for vector pathfinding
+    this.debugVisuals = new DebugVisuals(this.scene);
   }
 
   // Initialize objects in our world
-  init() {
-    // ----- create two mazes -----
-    this.map = new TileMap(2);
-    this.map2 = new TileMap(2);
+  // Initialize objects in our world
+init() {
+  this.loadingComplete = false;
+  this.modelsLoaded = 0;
+  this.modelsLoading = 0;
 
-    Setup.createLight(this.scene);
-    Setup.showHelpers(this.scene, this.camera, this.renderer, this.map);
+  // ----- create two mazes -----
+  this.map = new TileMap(2);
+  this.map2 = new TileMap(2);
 
-    // gap between the two mazes
-    this.mazeGap = 6;
+  Setup.createLight(this.scene);
+  Setup.showHelpers(this.scene, this.camera, this.renderer, this.map);
 
-    // full width of one maze in world units
-    this.mapWorldWidth = this.map.cols * this.map.tileSize;
+  // gap between the two mazes
+  this.mazeGap = 4;
 
-    // offset for second maze
-    this.map2Offset = new THREE.Vector3(this.mapWorldWidth + this.mazeGap, 0, 0);
+  // full width of one maze in world units
+  this.mapWorldWidth = this.map.cols * this.map.tileSize;
 
-    // ----- create hallway connection between mazes -----
-    let preferredRow = Math.floor(this.map.rows / 2);
-    let row1 = this.findClosestWalkableRow(this.map, preferredRow, 'right');
-    let row2 = this.findClosestWalkableRow(this.map2, preferredRow, 'left');
+  // offset for second maze
+  this.map2Offset = new THREE.Vector3(this.mapWorldWidth + this.mazeGap, 0, 0);
 
-    // use same row if possible
-    this.connectionRow = row1;
-    if (this.map2.grid[this.connectionRow] && this.map2.grid[this.connectionRow][1].isWalkable()) {
-      row2 = this.connectionRow;
-    } else {
-      this.connectionRow = row2;
-      row1 = this.findClosestWalkableRow(this.map, this.connectionRow, 'right');
-    }
+  // ----- create hallway connection between mazes -----
+  let preferredRow = Math.floor(this.map.rows / 2);
+  let row1 = this.findClosestWalkableRow(this.map, preferredRow, 'right');
+  let row2 = this.findClosestWalkableRow(this.map2, preferredRow, 'left');
 
-    this.openMazeSide(this.map, row1, 'right');
-    this.openMazeSide(this.map2, row2, 'left');
+  // use same row if possible
+  this.connectionRow = row1;
+  if (this.map2.grid[this.connectionRow] && this.map2.grid[this.connectionRow][1].isWalkable()) {
+    row2 = this.connectionRow;
+  } else {
+    this.connectionRow = row2;
+    row1 = this.findClosestWalkableRow(this.map, this.connectionRow, 'right');
+  }
 
-    this.map.walkableTiles = this.map.grid.flat().filter(tile => tile.isWalkable());
-    this.map2.walkableTiles = this.map2.grid.flat().filter(tile => tile.isWalkable());
+  this.openMazeSide(this.map, row1, 'right');
+  this.openMazeSide(this.map2, row2, 'left');
 
-    // ----- render first maze in its own group -----
-    this.mazeGroup1 = new THREE.Group();
-    this.scene.add(this.mazeGroup1);
+  this.map.walkableTiles = this.map.grid.flat().filter(tile => tile.isWalkable());
+  this.map2.walkableTiles = this.map2.grid.flat().filter(tile => tile.isWalkable());
 
-    this.tileMapRenderer = new TileMapRenderer(this.map);
-    this.tileMapRenderer.render(this.mazeGroup1);
+  // ----- render first maze in its own group -----
+  this.mazeGroup1 = new THREE.Group();
+  this.scene.add(this.mazeGroup1);
 
-    // ----- render second maze in its own group -----
-    this.mazeGroup2 = new THREE.Group();
-    this.mazeGroup2.position.copy(this.map2Offset);
-    this.scene.add(this.mazeGroup2);
+  this.tileMapRenderer = new TileMapRenderer(this.map);
+  this.tileMapRenderer.render(this.mazeGroup1);
 
-    this.tileMapRenderer2 = new TileMapRenderer(this.map2);
-    this.tileMapRenderer2.render(this.mazeGroup2);
+  // ----- render second maze in its own group -----
+  this.mazeGroup2 = new THREE.Group();
+  this.mazeGroup2.position.copy(this.map2Offset);
+  this.scene.add(this.mazeGroup2);
 
-    // ----- render hallway between them -----
-    this.createHallway(row1, row2);
+  this.tileMapRenderer2 = new TileMapRenderer(this.map2);
+  this.tileMapRenderer2.render(this.mazeGroup2);
 
-    // Create main character on the ground – set topSpeed so it respects max speed
-    this.main_character = new DynamicEntity({
-      position: new THREE.Vector3(0, 0, 0),
-      velocity: new THREE.Vector3(0, 0, 0),
-      topSpeed: this.moveSpeed,
-      color: 0x3333ff,
-      scale: new THREE.Vector3(1, 1, 1)
-    });
+  // ----- render hallway between them -----
+  this.createHallway(row1, row2);
 
-    let attackerTile;
-let attackerPosition;
+  // -------- DOOR GOAL (for vector pathfinding) --------
+  this.doorGoal = this.map.grid[row1][this.map.cols - 1];
+  if (!this.doorGoal.isWalkable()) {
+    this.doorGoal = this.map.grid[row1][this.map.cols - 2];
+  }
 
-do {
-  attackerTile = this.map.getRandomWalkableTile();
-  attackerPosition = this.map.localize(attackerTile);
-} while (attackerPosition.distanceTo(new THREE.Vector3(0, 0, 0)) < 6);
+  // Create main character on the ground – set topSpeed so it respects max speed
+  this.main_character = new DynamicEntity({
+    position: new THREE.Vector3(0, 0, 0),
+    velocity: new THREE.Vector3(0, 0, 0),
+    topSpeed: this.moveSpeed,
+    color: 0x3333ff,
+    scale: new THREE.Vector3(1, 1, 1)
+  });
 
-this.ground_attacker = new DynamicEntity({
-  position: attackerPosition,
-  velocity: new THREE.Vector3(0, 0, 0),
-  color: 0x660000,
-  scale: new THREE.Vector3(1, 0.75, 1)
-});
+  // create ground attackers for vector pathfinding testing
+  this.createGroundAttackers(10);
 
-    this.addEntityToWorld(this.ground_attacker);
+  // -------- VECTOR PATHFINDING FOR ATTACKER --------
+  this.groundVectorPathFinding = new VectorPathFinding(
+    this.map,
+    this.ground_attackers,
+    this.scene,
+    this.debugVisuals
+  );
 
-    // ----- Load officer_with_gun model for main character -----
-    const tempCubeGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-    const tempCubeMat = new THREE.MeshStandardMaterial({
-      color: 0x33aaff,
-      emissive: 0x004466,
-      transparent: true,
-      opacity: 0.8
-    });
-    const tempCube = new THREE.Mesh(tempCubeGeo, tempCubeMat);
-    tempCube.position.set(0, 0.75, 0);
-    this.main_character.mesh.add(tempCube);
+  this.groundVectorPathFinding.buildCostField(this.doorGoal);
+  this.groundVectorPathFinding.allTileArrows(this.doorGoal);
 
-    const loadingRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.8, 0.1, 16, 32),
-      new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0x442200 })
-    );
-    loadingRing.position.set(0, 1.2, 0);
-    this.main_character.mesh.add(loadingRing);
-    this.main_character.loadingRing = loadingRing;
+  // ----- Load officer_with_gun model for main character -----
+  const tempCubeGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+  const tempCubeMat = new THREE.MeshStandardMaterial({
+    color: 0x33aaff,
+    emissive: 0x004466,
+    transparent: true,
+    opacity: 0.8
+  });
+  const tempCube = new THREE.Mesh(tempCubeGeo, tempCubeMat);
+  tempCube.position.set(0, 0.75, 0);
+  this.main_character.mesh.add(tempCube);
 
-    const loader = new GLTFLoader();
-    loader.load(
-      '/officer_with_gun/scene.gltf',
-      (gltf) => {
-        const model = gltf.scene;
-        console.log('Main character model loaded:', gltf.scene);
+  const loadingRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.8, 0.1, 16, 32),
+    new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0x442200 })
+  );
+  loadingRing.position.set(0, 1.2, 0);
+  this.main_character.mesh.add(loadingRing);
+  this.main_character.loadingRing = loadingRing;
 
-        while (this.main_character.mesh.children.length > 0) {
-          this.main_character.mesh.remove(this.main_character.mesh.children[0]);
-        }
+  const loader = new GLTFLoader();
+  loader.load(
+    '/officer_with_gun/scene.gltf',
+    (gltf) => {
+      const model = gltf.scene;
+      console.log('Main character model loaded:', gltf.scene);
 
-        model.scale.set(1.8, 1.8, 1.8);
-        model.position.set(0, -0.5, 0);
+      while (this.main_character.mesh.children.length > 0) {
+        this.main_character.mesh.remove(this.main_character.mesh.children[0]);
+      }
 
-        const box = new THREE.Box3().setFromObject(model);
-        model.position.y = -box.min.y;
+      model.scale.set(1.8, 1.8, 1.8);
+      model.position.set(0, -0.5, 0);
 
-        this.main_character.mesh.add(model);
-        this.main_character.model = model;
+      const box = new THREE.Box3().setFromObject(model);
+      model.position.y = -box.min.y;
 
-        if (gltf.animations && gltf.animations.length > 0) {
-          const mixer = new THREE.AnimationMixer(model);
-          this.mainCharacterMixer = mixer;
+      this.main_character.mesh.add(model);
+      this.main_character.model = model;
 
-          gltf.animations.forEach((clip, idx) => {
-            const action = mixer.clipAction(clip);
-            this.mainCharacterActions[idx] = action;
-          });
+      if (gltf.animations && gltf.animations.length > 0) {
+        const mixer = new THREE.AnimationMixer(model);
+        this.mainCharacterMixer = mixer;
 
-          const idleAction = this.mainCharacterActions[0];
-          if (idleAction) {
-            idleAction.play();
-            this.currentMainAction = idleAction;
-          }
-        }
+        gltf.animations.forEach((clip, idx) => {
+          const action = mixer.clipAction(clip);
+          this.mainCharacterActions[idx] = action;
+        });
 
-        this.main_character.color = 0x44aaff;
-      },
-      undefined,
-      (error) => {
-        console.error('Error loading officer_with_gun model:', error);
-        if (this.main_character.mesh.children[0]) {
-          this.main_character.mesh.children[0].material.color.setHex(0xff0000);
-          this.main_character.mesh.children[0].material.transparent = false;
-        }
-        if (this.main_character.loadingRing) {
-          this.main_character.loadingRing.material.color.setHex(0xff0000);
+        const idleAction = this.mainCharacterActions[0];
+        if (idleAction) {
+          idleAction.play();
+          this.currentMainAction = idleAction;
         }
       }
-    );
 
-    this.addEntityToWorld(this.main_character);
+      this.main_character.color = 0x44aaff;
+    },
+    undefined,
+    (error) => {
+      console.error('Error loading officer_with_gun model:', error);
+      if (this.main_character.mesh.children[0]) {
+        this.main_character.mesh.children[0].material.color.setHex(0xff0000);
+        this.main_character.mesh.children[0].material.transparent = false;
+      }
+      if (this.main_character.loadingRing) {
+        this.main_character.loadingRing.material.color.setHex(0xff0000);
+      }
+    }
+  );
 
-    // first maze content
-    this.createGoals(5);
-    this.createNPCs(10);
+  this.addEntityToWorld(this.main_character);
 
-    // second maze content
-    this.createGoalsForMap(this.map2, this.map2Offset, 5);
-    this.createNPCsForMap(this.map2, this.map2Offset, 10);
+  // first maze content
+  this.createGoals(5);
 
-    this.createLoadingIndicator();
-  }
+  this.createLoadingIndicator();
+
+  this.createNPCs(10);
+
+  // second maze content
+  this.createGoalsForMap(this.map2, this.map2Offset, 5);
+  this.createNPCsForMap(this.map2, this.map2Offset, 10);
+}
 
   findClosestWalkableRow(map, preferredRow, side = 'right') {
     const col = side === 'right' ? map.cols - 2 : 1;
@@ -369,6 +388,8 @@ this.ground_attacker = new DynamicEntity({
     }
   }
 
+  
+
   // for second maze ....create NPCs with offset
   createNPCsForMap(map, offset, numNPCs = 10) {
     this.modelsLoading += numNPCs;
@@ -483,43 +504,88 @@ this.ground_attacker = new DynamicEntity({
 
   // Update loading indicator
   updateLoadingIndicator() {
-    if (this.loadingComplete) {
-      return;
-    }
-
-    const progress = this.modelsLoading > 0
-      ? (this.modelsLoaded / this.modelsLoading) * 100
-      : 0;
-
-    // Update canvas text
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = 'white';
-    ctx.font = 'bold 24px Arial';
-    ctx.fillText(`Loading: ${Math.round(progress)}%`, 10, 50);
-
-    // Draw progress bar
-    ctx.fillStyle = '#333';
-    ctx.fillRect(10, 70, 200, 20);
-    ctx.fillStyle = '#0f0';
-    ctx.fillRect(10, 70, 200 * (progress / 100), 20);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    this.loadingSprite.material.map = texture;
-    this.loadingSprite.material.needsUpdate = true;
-
-    if (
-      this.modelsLoaded === this.modelsLoading &&
-      this.modelsLoading > 0
-    ) {
-      this.loadingComplete = true;
-      setTimeout(() => {
-        this.scene.remove(this.loadingSprite);
-      }, 2000);
-    }
+  if (this.loadingComplete) {
+    return;
   }
+
+  if (!this.loadingSprite) {
+    return;
+  }
+
+  const progress = this.modelsLoading > 0
+    ? (this.modelsLoaded / this.modelsLoading) * 100
+    : 0;
+
+  // Update canvas text
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 24px Arial';
+  ctx.fillText(`Loading: ${Math.round(progress)}%`, 10, 50);
+
+  // Draw progress bar
+  ctx.fillStyle = '#333';
+  ctx.fillRect(10, 70, 200, 20);
+  ctx.fillStyle = '#0f0';
+  ctx.fillRect(10, 70, 200 * (progress / 100), 20);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  this.loadingSprite.material.map = texture;
+  this.loadingSprite.material.needsUpdate = true;
+
+  if (
+    this.modelsLoaded >= this.modelsLoading &&
+    this.modelsLoading > 0
+  ) {
+    this.loadingComplete = true;
+    setTimeout(() => {
+      if (this.loadingSprite && this.loadingSprite.parent) {
+        this.scene.remove(this.loadingSprite);
+      }
+      this.loadingSprite = null;
+    }, 2000);
+  }
+}
+
+
+  // create 10 ground attackers in the first maze (for vector pathfinding testing)
+  createGroundAttackers(numAttackers = 10) {
+  this.ground_attackers = [];
+
+  for (let i = 0; i < numAttackers; i++) {
+    let attackerTile;
+    let attackerPosition;
+    let tries = 0;
+
+    do {
+      attackerTile = this.map.getRandomWalkableTile();
+      attackerPosition = this.map.localize(attackerTile);
+      tries++;
+    } while (
+      tries < 300 &&
+      (
+        attackerPosition.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
+        attackerPosition.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
+        this.ground_attackers.some(a => a.position.distanceTo(attackerPosition) < 5)
+      )
+    );
+
+    let attacker = new DynamicEntity({
+      position: attackerPosition.clone(),
+      velocity: new THREE.Vector3(0, 0, 0),
+      color: 0x660000,
+      scale: new THREE.Vector3(1, 0.75, 1)
+    });
+
+    attacker.boatLoaded = true;
+    attacker.position.y = 1;
+
+    this.ground_attackers.push(attacker);
+    this.addEntityToWorld(attacker);
+  }
+}
 
   // create 5 random goal in the world
   // create goals in the world with pier models
@@ -803,6 +869,32 @@ this.ground_attacker = new DynamicEntity({
   }
 
   // ----- Movement and animation methods (steering based) -----
+  respawnGroundAttacker(npc) {
+  let spawnTile;
+  let spawnPos;
+  let tries = 0;
+
+  do {
+    spawnTile = this.map.getRandomWalkableTile();
+    spawnPos = this.map.localize(spawnTile);
+    tries++;
+  } while (
+    tries < 300 &&
+    (
+      spawnPos.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
+      spawnPos.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
+      this.ground_attackers.some(a =>
+        a !== npc && a.position.distanceTo(spawnPos) < 5
+      )
+    )
+  );
+
+  npc.position.copy(spawnPos);
+  npc.position.y = 1;
+
+  npc.velocity.set(0, 0, 0);
+  if (npc.acceleration) npc.acceleration.set(0, 0, 0);
+}
 
   // Update main character movement using steering behaviours
   updateMainCharacter(dt) {
@@ -820,6 +912,24 @@ this.ground_attacker = new DynamicEntity({
     // Apply the steering force to the character
     this.main_character.applyForce(steering);
 
+    // Start jump when space is pressed
+    if (input.keys.space && !this.isJumping) {
+      this.isJumping = true;
+      this.jumpVelocity = this.jumpStrength;
+    }
+
+    // Apply jump physics
+    if (this.isJumping) {
+      this.main_character.position.y += this.jumpVelocity * dt;
+      this.jumpVelocity -= this.gravity * dt;
+
+      if (this.main_character.position.y <= this.groundY) {
+        this.main_character.position.y = this.groundY;
+        this.jumpVelocity = 0;
+        this.isJumping = false;
+      }
+    }
+
     // Debug logging (once per second)
     if (!this.logCounter) this.logCounter = 0;
     this.logCounter++;
@@ -829,12 +939,10 @@ this.ground_attacker = new DynamicEntity({
         w: input.keys.w,
         a: input.keys.a,
         s: input.keys.s,
-        d: input.keys.d
+        d: input.keys.d,
+        space: input.keys.space
       });
-      console.log('[DEBUG] desiredVelocity:', desiredVelocity);
-      console.log('[DEBUG] currentVelocity:', currentVel);
-      console.log('[DEBUG] steering force:', steering);
-      console.log('[DEBUG] position:', this.main_character.position);
+      
     }
 
     // Animation switching based on speed
@@ -856,20 +964,20 @@ this.ground_attacker = new DynamicEntity({
         this.currentMainAction = idleAction;
       }
     }
-  }
+}
 
   updateCameraFollow() {
   if (!this.main_character) return;
 
   const target = this.main_character.position.clone();
 
-  // camera offset relative to player
-  const desiredPosition = target.clone().add(new THREE.Vector3(0, 18, 14));
+  // closer + lower camera
+  const desiredPosition = target.clone().add(new THREE.Vector3(0, 15, 8));
 
   // smooth follow
   this.camera.position.lerp(desiredPosition, 0.08);
 
-  // always look at player
+  // look at player
   this.camera.lookAt(target.x, target.y, target.z);
 }
 
@@ -946,143 +1054,72 @@ snapEntityToWalkableTile(entity) {
 }
 
 // add wander behaviour for ground attacker
-updateGroundAttacker() {
-  const npc = this.ground_attacker;
-  if (!npc || !this.main_character) return;
+updateGroundAttackers() {
+  if (!this.ground_attackers || this.ground_attackers.length === 0) return;
+  if (!this.doorGoal || !this.groundVectorPathFinding) return;
 
-  // keep attacker on ground
-  npc.position.y = 1;
-  if (npc.velocity) npc.velocity.y = 0;
-  if (npc.acceleration) npc.acceleration.y = 0;
+  for (let npc of this.ground_attackers) {
+    npc.position.y = 1;
+    if (npc.velocity) npc.velocity.y = 0;
+    if (npc.acceleration) npc.acceleration.y = 0;
 
-  // -------- DISTANCE TO PLAYER --------
-  let distance = npc.position.distanceTo(this.main_character.position);
-  let steer = new THREE.Vector3();
+    const currentTile = this.map.quantize(npc.position);
 
-  // -------- STUCK DETECTION --------
-  if (!npc.stuckFrames) npc.stuckFrames = 0;
-
-  if (npc.velocity.length() < 0.15) {
-    npc.stuckFrames++;
-  } else {
-    npc.stuckFrames = 0;
-  }
-
-  // if stuck, force escape target
-  if (npc.stuckFrames > 20) {
-    const escapeTarget = this.getEscapeTargetFromCurrentTile(npc);
-
-    if (escapeTarget) {
-      steer.add(
-        SteeringBehaviours.seek(npc, escapeTarget).multiplyScalar(2.5)
-      );
+    // respawn as soon as attacker reaches the goal tile
+    if (
+      currentTile &&
+      currentTile.row === this.doorGoal.row &&
+      currentTile.col === this.doorGoal.col
+    ) {
+      this.respawnGroundAttacker(npc);
+      continue;
     }
-
-    npc.stuckFrames = 0;
-  }
-  // WANDER when FAR
-  else if (distance > 10) {
-    if (!npc.wanderAngle) {
-      npc.wanderAngle = Math.random() * Math.PI * 2;
-    }
-
-    const wanderRadius = 3;
-    const wanderDistance = 4;
-    const change = 0.3;
-
-    npc.wanderAngle += (Math.random() - 0.5) * change;
-
-    let forward = npc.velocity.clone();
-    if (forward.length() === 0) {
-      forward = new THREE.Vector3(1, 0, 0);
-    }
-    forward.normalize();
-
-    let circleCenter = forward.clone().multiplyScalar(wanderDistance);
-
-    let displacement = new THREE.Vector3(
-      Math.cos(npc.wanderAngle),
-      0,
-      Math.sin(npc.wanderAngle)
-    ).multiplyScalar(wanderRadius);
-
-    steer.add(circleCenter.add(displacement));
-  }
-  // CHASE when CLOSE
-  else {
-    let targetPos = this.main_character.position.clone();
-    let seekForce = SteeringBehaviours.seek(npc, targetPos);
-    steer.add(seekForce.multiplyScalar(1.8));
   }
 
-  // AVOID NPCs
-  for (let other of this.npcs) {
-    if (other === npc) continue;
+  this.groundVectorPathFinding.runVectorFieldPathFinding(this.doorGoal);
 
-    if (other.position.x >= this.map2Offset.x / 2) continue;
-
-    const obstacle = {
-      position: other.position.clone(),
-      radius: 1.5
-    };
-
-    const avoid = CollisionAvoidSteering.round(
-      npc,
-      obstacle,
-      1.2,
-      2.5,
-      { showLine(){}, showSphere(){}, hideObjs(){} }
-    );
-
-    steer.add(avoid.multiplyScalar(2.0));
-  }
-
-  // AVOID PLAYER when very close
-  if (distance < 3) {
-    const playerObstacle = {
-      position: this.main_character.position.clone(),
-      radius: 1.5
-    };
-
-    const avoidPlayer = CollisionAvoidSteering.round(
-      npc,
-      playerObstacle,
-      0.8,
-      1.5,
-      { showLine(){}, showSphere(){}, hideObjs(){} }
-    );
-
-    steer.add(avoidPlayer.multiplyScalar(2.0));
-  }
-
-  // APPLY FORCE
-  npc.applyForce(steer);
-
-  // keep inside map 1 rectangular bounds
   const minX = this.map.minX + 1;
   const maxX = this.map.minX + this.map.cols * this.map.tileSize - 1;
   const minZ = this.map.minZ + 1;
   const maxZ = this.map.minZ + this.map.rows * this.map.tileSize - 1;
 
-  npc.position.x = THREE.MathUtils.clamp(npc.position.x, minX, maxX);
-  npc.position.z = THREE.MathUtils.clamp(npc.position.z, minZ, maxZ);
+  for (let npc of this.ground_attackers) {
+    npc.position.x = THREE.MathUtils.clamp(npc.position.x, minX, maxX);
+    npc.position.z = THREE.MathUtils.clamp(npc.position.z, minZ, maxZ);
+    this.snapEntityToWalkableTile(npc);
+    npc.position.y = 1;
+  }
+}
 
-  // if it crosses into hallway / maze 2, teleport back safely
-  if (npc.position.x >= this.map2Offset.x / 2) {
-    let safeTile = this.map.getRandomWalkableTile();
-    let safePos = this.map.localize(safeTile);
-    npc.position.copy(safePos);
-    npc.velocity.set(0, 0, 0);
+// restart 
+reset() {
+  while (this.scene.children.length > 0) {
+    this.scene.remove(this.scene.children[0]);
   }
 
-  // final correction: make sure attacker is not on obstacle tile
-  this.snapEntityToWalkableTile(npc);
+  this.entities = [];
+  this.ground_attackers = [];
+  this.goals = [];
+  this.npcs = [];
+  this.mixers = [];
 
-  // keep y fixed after snapping
-  npc.position.y = 1;
+  this.main_character = null;
+  this.groundVectorPathFinding = null;
+  this.mazeGroup1 = null;
+  this.mazeGroup2 = null;
+  this.hallwayMesh = null;
+  this.loadingSprite = null;
 }
   // Update our world
   update() {
+    if (this.isGameOver) {
+  for (let mixer of this.mixers) {
+    mixer.stopAllAction();
+  }
+  return;
+}  
+
+if(!this.main_character) return;
     let dt = this.clock.getDelta();
 
     // Update main character movement and animation
@@ -1099,7 +1136,7 @@ updateGroundAttacker() {
     }
 
     //updateGroundAttacker with new steering behaviours
-    this.updateGroundAttacker();
+    this.updateGroundAttackers();
 
     // Update all entities (this includes the main character)
     for (let e of this.entities) {
@@ -1114,7 +1151,6 @@ updateGroundAttacker() {
     this.finalLogCounter++;
     if (this.finalLogCounter >= 60) {
       this.finalLogCounter = 0;
-      console.log('[DEBUG] After update - position:', this.main_character.position, 'velocity:', this.main_character.velocity);
     }
   }
 
