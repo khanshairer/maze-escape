@@ -9,6 +9,8 @@ import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js';
 import { DebugVisuals } from './debug/DebugVisuals.js';
 import { DungeonGenerator } from './pcg/DungeonGenerator.js';
+import { DungeonGuard } from './enemies/dungeon_guard.js';
+import { AStar } from './ai/pathfinding/aStar.js';
 /**
  * World class holds all information about our game's world
  */
@@ -31,6 +33,7 @@ export class World {
     this.npcs = [];
     this.mixers = [];
     this.ground_attackers = [];
+    this.dungeon_guards = [];
 
     // Main character animation mixer and actions
     this.mainCharacterMixer = null;
@@ -63,7 +66,6 @@ export class World {
   }
 
   // Initialize objects in our world
-  // Initialize objects in our world
 init() {
   this.loadingComplete = false;
   this.modelsLoaded = 0;
@@ -78,16 +80,10 @@ init() {
   Setup.createLight(this.scene);
   Setup.showHelpers(this.scene, this.camera, this.renderer, this.map);
 
-  // gap between the two mazes
   this.mazeGap = 4;
-
-  // full width of one maze in world units
   this.mapWorldWidth = this.map.cols * this.map.tileSize;
-
-  // offset for second maze
   this.map2Offset = new THREE.Vector3(this.mapWorldWidth + this.mazeGap, 0, 0);
 
-  // ----- create hallway connection between mazes -----
   let preferredRow = Math.floor(this.map.rows / 2);
   let row1 = this.findClosestWalkableRow(this.map, preferredRow, 'right');
   let row2 = this.findClosestWalkableRow(this.map2, preferredRow, 'left');
@@ -116,15 +112,12 @@ init() {
     0
   );
 
-  // ----- create hallway connection between map 2 and dungeon -----
   let row3 = this.findClosestWalkableRow(this.dungeonMap, preferredRow, 'left');
   let rowMap2ToDungeon = this.findClosestWalkableRow(this.map2, preferredRow, 'right');
 
   this.openMazeSide(this.map2, rowMap2ToDungeon, 'right');
   this.openMazeSide(this.dungeonMap, row3, 'left');
 
-  // ONLY connect the dungeon door into the dungeon interior
-  // do NOT carve through map2, that breaks maze2 movement
   this.connectSideToInterior(this.dungeonMap, row3, 'left');
 
   this.map.walkableTiles = this.map.grid.flat().filter(tile => tile.isWalkable());
@@ -146,6 +139,7 @@ init() {
   this.tileMapRenderer2 = new TileMapRenderer(this.map2);
   this.tileMapRenderer2.render(this.mazeGroup2);
 
+  // ----- render dungeon -----
   this.dungeonGroup = new THREE.Group();
   this.dungeonGroup.position.copy(this.dungeonOffset);
   this.scene.add(this.dungeonGroup);
@@ -153,12 +147,23 @@ init() {
   this.dungeonRenderer = new TileMapRenderer(this.dungeonMap);
   this.dungeonRenderer.render(this.dungeonGroup);
 
-  // ================================
+  // ======================================
+  // ✅ CREATE 4 DUNGEON GUARDS (NEW)
+  // ======================================
+  this.dungeon_guards = [];
 
-  // ----- render hallway between map 1 and map 2 -----
+  for (let i = 0; i < 4; i++) {
+    let guard = DungeonGuard.spawnInDungeon(this.dungeonMap, this.dungeonOffset);
+
+    if (guard) {
+      this.dungeon_guards.push(guard);
+      this.addEntityToWorld(guard);
+    }
+  }
+  // ======================================
+
+  // ----- render hallway -----
   this.createHallway(row1, row2);
-
-  // ----- render hallway between map 2 and dungeon -----
   this.createHallwayBetweenMap2AndDungeon(rowMap2ToDungeon, row3);
 
   // -------- DOOR GOAL --------
@@ -198,6 +203,7 @@ init() {
     transparent: true,
     opacity: 0.8
   });
+
   const tempCube = new THREE.Mesh(tempCubeGeo, tempCubeMat);
   tempCube.position.set(0, 0.75, 0);
   this.main_character.mesh.add(tempCube);
@@ -211,39 +217,36 @@ init() {
   this.main_character.loadingRing = loadingRing;
 
   const loader = new GLTFLoader();
-  loader.load(
-    '/officer_with_gun/scene.gltf',
-    (gltf) => {
-      const model = gltf.scene;
+  loader.load('/officer_with_gun/scene.gltf', (gltf) => {
+    const model = gltf.scene;
 
-      while (this.main_character.mesh.children.length > 0) {
-        this.main_character.mesh.remove(this.main_character.mesh.children[0]);
-      }
+    while (this.main_character.mesh.children.length > 0) {
+      this.main_character.mesh.remove(this.main_character.mesh.children[0]);
+    }
 
-      model.scale.set(1.8, 1.8, 1.8);
+    model.scale.set(1.8, 1.8, 1.8);
 
-      const box = new THREE.Box3().setFromObject(model);
-      model.position.y = -box.min.y;
+    const box = new THREE.Box3().setFromObject(model);
+    model.position.y = -box.min.y;
 
-      this.main_character.mesh.add(model);
+    this.main_character.mesh.add(model);
 
-      if (gltf.animations && gltf.animations.length > 0) {
-        const mixer = new THREE.AnimationMixer(model);
-        this.mainCharacterMixer = mixer;
+    if (gltf.animations && gltf.animations.length > 0) {
+      const mixer = new THREE.AnimationMixer(model);
+      this.mainCharacterMixer = mixer;
 
-        gltf.animations.forEach((clip, idx) => {
-          const action = mixer.clipAction(clip);
-          this.mainCharacterActions[idx] = action;
-        });
+      gltf.animations.forEach((clip, idx) => {
+        const action = mixer.clipAction(clip);
+        this.mainCharacterActions[idx] = action;
+      });
 
-        const idleAction = this.mainCharacterActions[0];
-        if (idleAction) {
-          idleAction.play();
-          this.currentMainAction = idleAction;
-        }
+      const idleAction = this.mainCharacterActions[0];
+      if (idleAction) {
+        idleAction.play();
+        this.currentMainAction = idleAction;
       }
     }
-  );
+  });
 
   this.addEntityToWorld(this.main_character);
 
@@ -1295,6 +1298,199 @@ updateGroundAttackers() {
   }
 }
 
+// dungeon guard movement functionalities start here 
+updateDungeonGuards(dt) {
+  if (!this.dungeon_guards || this.dungeon_guards.length === 0) return;
+  if (!this.main_character) return;
+
+  const playerPos = this.main_character.position.clone();
+
+  const playerInDungeon =
+    playerPos.x >= this.dungeonOffset.x + this.dungeonMap.minX &&
+    playerPos.x <= this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize &&
+    playerPos.z >= this.dungeonMap.minZ &&
+    playerPos.z <= this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize;
+
+  for (let guard of this.dungeon_guards) {
+    guard.applyGroundLock();
+
+    const distanceToPlayer = guard.position.distanceTo(playerPos);
+
+    // state switching
+    if (playerInDungeon && distanceToPlayer <= guard.detectionRadius) {
+      guard.state = 'chase';
+      guard.isAlerted = true;
+    } else if (guard.state === 'chase') {
+      guard.state = 'patrol';
+      guard.isAlerted = false;
+      guard.lastKnownPlayerTile = null;
+      guard.resetPath();
+    }
+
+    if (guard.state === 'patrol') {
+      this.updateDungeonGuardPatrol(guard, dt);
+    } else if (guard.state === 'chase') {
+      this.updateDungeonGuardChase(guard, dt);
+    }
+  }
+}
+
+updateDungeonGuards(dt) {
+  if (!this.dungeon_guards || this.dungeon_guards.length === 0) return;
+  if (!this.main_character) return;
+
+  const playerPos = this.main_character.position.clone();
+
+  const playerInDungeon =
+    playerPos.x >= this.dungeonOffset.x + this.dungeonMap.minX &&
+    playerPos.x <= this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize &&
+    playerPos.z >= this.dungeonMap.minZ &&
+    playerPos.z <= this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize;
+
+  for (let guard of this.dungeon_guards) {
+    guard.applyGroundLock();
+
+    const distanceToPlayer = guard.position.distanceTo(playerPos);
+
+    // state switching
+    if (playerInDungeon && distanceToPlayer <= guard.detectionRadius) {
+      guard.state = 'chase';
+      guard.isAlerted = true;
+    } else if (guard.state === 'chase') {
+      guard.state = 'patrol';
+      guard.isAlerted = false;
+      guard.lastKnownPlayerTile = null;
+      guard.resetPath();
+    }
+
+    if (guard.state === 'patrol') {
+      this.updateDungeonGuardPatrol(guard, dt);
+    } else if (guard.state === 'chase') {
+      this.updateDungeonGuardChase(guard, dt);
+    }
+  }
+}
+
+updateDungeonGuardPatrol(guard, dt) {
+  const localPos = guard.position.clone().sub(this.dungeonOffset);
+  const currentTile = this.dungeonMap.quantize(localPos);
+
+  if (!currentTile) return;
+
+  if (!guard.targetTile || guard.path.length === 0 || guard.pathIndex >= guard.path.length) {
+    let foundPath = false;
+    let tries = 0;
+
+    while (!foundPath && tries < 20) {
+      let randomTile =
+        this.dungeonMap.walkableTiles[
+          Math.floor(Math.random() * this.dungeonMap.walkableTiles.length)
+        ];
+
+      let newPath = AStar.findPath(currentTile, randomTile, this.dungeonMap);
+
+      if (newPath && newPath.length > 1) {
+        guard.targetTile = randomTile;
+        guard.path = newPath;
+        guard.pathIndex = 1; // skip current tile
+        foundPath = true;
+      }
+
+      tries++;
+    }
+
+    if (!foundPath) {
+      guard.path = [];
+      guard.pathIndex = 0;
+      return;
+    }
+  }
+
+  this.followDungeonGuardPath(guard);
+}
+
+updateDungeonGuardChase(guard, dt) {
+  const localGuardPos = guard.position.clone().sub(this.dungeonOffset);
+  const localPlayerPos = this.main_character.position.clone().sub(this.dungeonOffset);
+
+  const currentTile = this.dungeonMap.quantize(localGuardPos);
+  const playerTile = this.dungeonMap.quantize(localPlayerPos);
+
+  if (!currentTile || !playerTile) return;
+
+  guard.repathTimer -= dt;
+
+  if (guard.repathTimer <= 0 || guard.path.length === 0) {
+    guard.path = AStar.findPath(currentTile, playerTile, this.dungeonMap);
+    guard.pathIndex = 0;
+    guard.repathTimer = 0.4;
+    guard.lastKnownPlayerTile = playerTile;
+  }
+
+  this.followDungeonGuardPath(guard);
+}
+
+followDungeonGuardPath(guard) {
+  if (!guard.path || guard.path.length === 0) return;
+  if (guard.pathIndex >= guard.path.length) return;
+
+  const waypoint = this.dungeonMap
+    .localize(guard.path[guard.pathIndex])
+    .clone()
+    .add(this.dungeonOffset);
+
+  let desired = waypoint.clone().sub(guard.position);
+  desired.y = 0;
+
+  // move to next waypoint
+  if (desired.length() < 0.35) {
+    guard.pathIndex++;
+    return;
+  }
+
+  // arrival behavior
+  let speed = guard.topSpeed || 3.0;
+  if (desired.length() < guard.arrivalRadius) {
+    speed = speed * (desired.length() / guard.arrivalRadius);
+  }
+
+  if (desired.length() > 0.001) {
+    desired.setLength(Math.max(speed, 0.2));
+  }
+
+  let steering = desired.sub(guard.velocity);
+  steering.clampLength(0, guard.maxSteeringForce || 4.0);
+
+  // separation from other guards
+  let separation = this.computeDungeonGuardSeparation(guard);
+  steering.add(separation);
+
+  guard.applyForce(steering);
+}
+
+computeDungeonGuardSeparation(guard) {
+  let force = new THREE.Vector3();
+
+  for (let other of this.dungeon_guards) {
+    if (other === guard) continue;
+
+    let offset = guard.position.clone().sub(other.position);
+    let dist = offset.length();
+
+    if (dist > 0 && dist < guard.separationRadius) {
+      offset.normalize();
+      offset.divideScalar(dist);
+      force.add(offset);
+    }
+  }
+
+  if (force.length() > 0) {
+    force.setLength(guard.separationStrength);
+  }
+
+  return force;
+}
+
 // restart 
 reset() {
   while (this.scene.children.length > 0) {
@@ -1320,6 +1516,8 @@ reset() {
   this.hallwayMesh2 = null;
   this.hallwayBounds2 = null;
   this.dungeonOffset = null;
+  this.dungeon_guards = [];
+  this.isGameOver = false;
 }
 
   // Update our world
@@ -1367,6 +1565,9 @@ reset() {
 
   //updateGroundAttacker with new steering behaviours
   this.updateGroundAttackers();
+
+  // Update dungeon guards
+  this.updateDungeonGuards(dt);
 
   // Update all entities (this includes the main character)
   for (let e of this.entities) {
