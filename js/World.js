@@ -5,8 +5,11 @@ import { TileMap } from './maps/TileMap.js';
 import { Tile } from './maps/Tile.js';
 import { TileMapRenderer } from './renderers/TileMapRenderer.js';
 import { DynamicEntity } from './entities/DynamicEntity.js';
+import { DroneEnemy } from './entities/DroneEnemy.js';
+import { EnergyCell } from './entities/EnergyCell.js';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js';
+import { HierarchicalAStar } from './ai/pathfinding/HierarchicalAStar.js';
 import { DebugVisuals } from './debug/DebugVisuals.js';
 import { DungeonGenerator } from './pcg/DungeonGenerator.js';
 import { JPS } from './ai/pathfinding/JPS.js';
@@ -29,10 +32,27 @@ export class World {
     this.entities = [];
 
     // added ................
-    this.goals = [];
+    this.energyCells = [];
+    this.drones = [];
     this.npcs = [];
     this.mixers = [];
-    this.ground_attackers = [];
+    this.collectedEnergyCells = 0;
+    this.totalEnergyCells = 0;
+    this.unlockRequirementFraction = 0.5;
+    this.energyCellsRequiredForUnlock = 0;
+    this.energyCellCollectionRadius = 1.5;
+    this.controllerExit = null;
+    this.controllerExitTile = null;
+    this.controllerExitUnlocked = false;
+    this.controllerExitReached = false;
+    this.controllerExitActivationRadius = 1.8;
+    this.groundAttackerSpawnCount = 4;
+    this.groundAttackerRespawnDelay = 4;
+    this.droneClusterSize = 5;
+    this.dungeonGuard = null;
+    this.dungeonPatrolTiles = [];
+    this.dungeonPatrolPath = [];
+    this.dungeonPatrolLine = null;
 
     // Main character animation mixer and actions
     this.mainCharacterMixer = null;
@@ -129,9 +149,12 @@ init() {
   // do NOT carve through map2, that breaks maze2 movement
   this.connectSideToInterior(this.dungeonMap, row3, 'left');
 
-  this.map.walkableTiles = this.map.grid.flat().filter(tile => tile.isWalkable());
-  this.map2.walkableTiles = this.map2.grid.flat().filter(tile => tile.isWalkable());
-  this.dungeonMap.walkableTiles = this.dungeonMap.grid.flat().filter(tile => tile.isWalkable());
+	  this.map.walkableTiles = this.map.grid.flat().filter(tile => tile.isWalkable());
+	  this.map2.walkableTiles = this.map2.grid.flat().filter(tile => tile.isWalkable());
+	  this.dungeonMap.walkableTiles = this.dungeonMap.grid.flat().filter(tile => tile.isWalkable());
+	  this.droneHierarchicalPathfinder = new HierarchicalAStar(this.map, {
+	    clusterSize: this.droneClusterSize
+	  });
 
   // ----- render first maze -----
   this.mazeGroup1 = new THREE.Group();
@@ -163,6 +186,13 @@ init() {
   // ----- render hallway between map 2 and dungeon -----
   this.createHallwayBetweenMap2AndDungeon(rowMap2ToDungeon, row3);
 
+  this.dungeonEntryTile = this.dungeonMap.grid[row3][0];
+  this.controllerExitTile = this.findFarthestWalkableTile(
+    this.dungeonMap,
+    this.dungeonEntryTile
+  );
+  this.createControllerExit();
+
   // -------- DOOR GOAL --------
   this.doorGoal = this.map.grid[row1][this.map.cols - 1];
   if (!this.doorGoal.isWalkable()) {
@@ -179,12 +209,12 @@ init() {
   });
 
   // attackers
-  this.createGroundAttackers(10);
+  this.createGameplayDrones(this.groundAttackerSpawnCount);
 
   // vector pathfinding
   this.groundVectorPathFinding = new VectorPathFinding(
     this.map,
-    this.ground_attackers,
+    this.drones,
     this.scene,
     this.debugVisuals
   );
@@ -249,16 +279,162 @@ init() {
 
   this.addEntityToWorld(this.main_character);
 
-  //this.createGoals(5);
   this.createLoadingIndicator();
   this.createNPCs(10);
   this.createPatrolLoopInDungeon3();
   this.drawDungeon3PatrolLoop();
   this.createDungeonGuard();
-
-  //this.createGoalsForMap(this.map2, this.map2Offset, 5);
+  this.createEnergyCells(5);
   this.createNPCsForMap(this.map2, this.map2Offset, 10);
+  this.createEnergyCellsForMap(this.map2, this.map2Offset, 5);
+  this.updateEnergyUnlockRequirement();
 }
+
+  findFarthestWalkableTile(map, fromTile) {
+    if (!fromTile || !fromTile.isWalkable()) {
+      return map.getRandomWalkableTile();
+    }
+
+    let farthestTile = fromTile;
+    let farthestDistance = -Infinity;
+
+    for (let tile of map.walkableTiles) {
+      const distance =
+        Math.abs(tile.row - fromTile.row) +
+        Math.abs(tile.col - fromTile.col);
+
+      if (distance > farthestDistance) {
+        farthestDistance = distance;
+        farthestTile = tile;
+      }
+    }
+
+    return farthestTile;
+  }
+
+  createControllerExit() {
+    if (!this.controllerExitTile) {
+      return;
+    }
+
+    const exitPosition = this.dungeonMap
+      .localize(this.controllerExitTile)
+      .clone()
+      .add(this.dungeonOffset);
+
+    const group = new THREE.Group();
+    group.position.copy(exitPosition);
+
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.1, 1.3, 0.4, 24),
+      new THREE.MeshStandardMaterial({
+        color: 0x30363d,
+        emissive: 0x111111
+      })
+    );
+    base.position.y = 0.2;
+    group.add(base);
+
+    const coreMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff5533,
+      emissive: 0x661100,
+      emissiveIntensity: 1.2
+    });
+
+    const core = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.55, 0.55, 1.8, 18),
+      coreMaterial
+    );
+    core.position.y = 1.2;
+    group.add(core);
+
+    const beacon = new THREE.Mesh(
+      new THREE.TorusGeometry(0.95, 0.08, 12, 24),
+      new THREE.MeshStandardMaterial({
+        color: 0xffaa44,
+        emissive: 0x553300,
+        emissiveIntensity: 0.9
+      })
+    );
+    beacon.rotation.x = Math.PI / 2;
+    beacon.position.y = 1.2;
+    group.add(beacon);
+
+    group.userData = {
+      base,
+      core,
+      beacon,
+      lockedColor: 0xff5533,
+      lockedEmissive: 0x661100,
+      unlockedColor: 0x33ff99,
+      unlockedEmissive: 0x116644
+    };
+
+    this.controllerExit = {
+      mesh: group,
+      position: exitPosition,
+      tile: this.controllerExitTile
+    };
+
+    this.scene.add(group);
+    this.updateControllerExitVisualState(0);
+  }
+
+  updateControllerExitVisualState(dt = 0) {
+    if (!this.controllerExit) {
+      return;
+    }
+
+    const { core, beacon, lockedColor, lockedEmissive, unlockedColor, unlockedEmissive } =
+      this.controllerExit.mesh.userData;
+
+    if (this.controllerExitUnlocked) {
+      core.material.color.setHex(unlockedColor);
+      core.material.emissive.setHex(unlockedEmissive);
+      beacon.material.color.setHex(0xaaffdd);
+      beacon.material.emissive.setHex(0x227755);
+      beacon.rotation.z += dt * 1.5;
+    } else {
+      core.material.color.setHex(lockedColor);
+      core.material.emissive.setHex(lockedEmissive);
+      beacon.material.color.setHex(0xffaa44);
+      beacon.material.emissive.setHex(0x553300);
+      beacon.rotation.z += dt * 0.35;
+    }
+  }
+
+  updateControllerExitState(dt) {
+    if (!this.controllerExit) {
+      return;
+    }
+
+    this.controllerExitUnlocked =
+      this.energyCellsRequiredForUnlock > 0 &&
+      this.collectedEnergyCells >= this.energyCellsRequiredForUnlock;
+
+    this.updateControllerExitVisualState(dt);
+  }
+
+  updateEnergyUnlockRequirement() {
+    this.energyCellsRequiredForUnlock = Math.ceil(
+      this.totalEnergyCells * this.unlockRequirementFraction
+    );
+  }
+
+  isPlayerAtUnlockedControllerExit() {
+    if (
+      !this.main_character ||
+      !this.controllerExit ||
+      !this.controllerExitUnlocked
+    ) {
+      return false;
+    }
+
+    return (
+      this.main_character.position.distanceTo(this.controllerExit.position) <=
+      this.controllerExitActivationRadius
+    );
+  }
 
   findClosestWalkableRow(map, preferredRow, side = 'right') {
     const col = side === 'right' ? map.cols - 2 : 1;
@@ -485,10 +661,307 @@ connectSideToInterior(map, row, side = 'left') {
   return this.map;
 }
 
-  
-  
+  // Spawn collectible energy cells in an offset map area.
+  createEnergyCellsForMap(map, offset, numCells = 5) {
+    this.spawnEnergyCells(map, offset, numCells);
+  }
 
-  // for second maze ....create NPCs with offset
+
+  // Create a loading indicator in the scene
+  createLoadingIndicator() {
+    // Create a text sprite or simple indicator
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 24px Arial';
+    ctx.fillText('Loading drones...', 10, 50);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture });
+    this.loadingSprite = new THREE.Sprite(material);
+    this.loadingSprite.position.set(0, 5, 0);
+    this.loadingSprite.scale.set(5, 2.5, 1);
+    this.scene.add(this.loadingSprite);
+  }
+
+  // Update loading indicator
+  updateLoadingIndicator() {
+  if (this.loadingComplete) {
+    return;
+  }
+
+  if (!this.loadingSprite) {
+    return;
+  }
+
+  const progress = this.modelsLoading > 0
+    ? (this.modelsLoaded / this.modelsLoading) * 100
+    : 0;
+
+  // Update canvas text
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 24px Arial';
+  ctx.fillText(`Loading: ${Math.round(progress)}%`, 10, 50);
+
+  // Draw progress bar
+  ctx.fillStyle = '#333';
+  ctx.fillRect(10, 70, 200, 20);
+  ctx.fillStyle = '#0f0';
+  ctx.fillRect(10, 70, 200 * (progress / 100), 20);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  this.loadingSprite.material.map = texture;
+  this.loadingSprite.material.needsUpdate = true;
+
+  if (
+    this.modelsLoaded >= this.modelsLoading &&
+    this.modelsLoading > 0
+  ) {
+    this.loadingComplete = true;
+    setTimeout(() => {
+      if (this.loadingSprite && this.loadingSprite.parent) {
+        this.scene.remove(this.loadingSprite);
+      }
+      this.loadingSprite = null;
+    }, 2000);
+  }
+}
+
+
+  createGameplayDrones(numDrones = 4) {
+    this.drones = [];
+    this.modelsLoading = numDrones;
+    this.modelsLoaded = 0;
+
+    for (let i = 0; i < numDrones; i++) {
+      const droneTile = this.getValidDroneSpawnTile(this.map, this.drones);
+      const dronePosition = this.map.localize(droneTile);
+
+      const drone = new DroneEnemy({
+        spawnTile: droneTile,
+        homeTile: droneTile,
+        patrolMap: this.map,
+        position: dronePosition.clone(),
+        velocity: new THREE.Vector3(0, 0, 0),
+        color: 0xffaa33,
+        scale: new THREE.Vector3(1, 1, 1),
+        topSpeed: 3.5
+      });
+
+      drone.position.y = 1;
+      drone.mesh.rotation.y = Math.random() * Math.PI * 2;
+	      drone.initializeFSM({
+	        player: this.main_character,
+	        world: this
+	      });
+	      drone.setPathfinder(this.droneHierarchicalPathfinder);
+
+	      this.loadDroneVisual(drone);
+      this.drones.push(drone);
+      this.addEntityToWorld(drone);
+    }
+  }
+
+  getValidDroneSpawnTile(map, existingDrones = []) {
+    let spawnTile;
+    let spawnPosition;
+    let tries = 0;
+
+    do {
+      spawnTile = map.getRandomWalkableTile();
+      spawnPosition = map.localize(spawnTile);
+      tries++;
+    } while (
+      tries < 300 &&
+      (
+        spawnPosition.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
+        spawnPosition.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
+        existingDrones.some((drone) => drone.position.distanceTo(spawnPosition) < 5)
+      )
+    );
+
+    return spawnTile;
+  }
+
+  loadDroneVisual(drone) {
+    const loader = new GLTFLoader();
+    loader.load(
+      '/animated_drone/scene.gltf',
+      (gltf) => {
+        drone.applyDroneModel(gltf, this.mixers);
+        this.modelsLoaded++;
+        this.updateLoadingIndicator();
+      },
+      undefined,
+      () => {
+        drone.handleLoadError();
+        this.modelsLoaded++;
+        this.updateLoadingIndicator();
+      }
+    );
+  }
+
+  createEnergyCells(numCells = 5) {
+    this.spawnEnergyCells(this.map, new THREE.Vector3(0, 0, 0), numCells);
+  }
+
+  spawnEnergyCells(map, offset, numCells = 5) {
+    let createdCount = 0;
+    let attempts = 0;
+    const maxAttempts = 1000;
+
+    while (createdCount < numCells && attempts < maxAttempts) {
+      attempts++;
+
+      const randomTile =
+        map.walkableTiles[Math.floor(Math.random() * map.walkableTiles.length)];
+
+      if (!this.isValidEnergyCellTile(map, randomTile, offset)) {
+        continue;
+      }
+
+      const cell = new EnergyCell({
+        tile: randomTile,
+        map,
+        offset,
+        position: map.localize(randomTile).clone().add(offset)
+      });
+
+      this.energyCells.push(cell);
+      this.totalEnergyCells++;
+      this.scene.add(cell.mesh);
+      createdCount++;
+    }
+  }
+
+  isValidEnergyCellTile(map, tile, offset) {
+    if (!tile || !tile.isWalkable()) {
+      return false;
+    }
+
+    const occupied = this.energyCells.some(
+      (cell) =>
+        cell.map === map &&
+        cell.tile.row === tile.row &&
+        cell.tile.col === tile.col
+    );
+
+    if (occupied) {
+      return false;
+    }
+
+    if (!this.main_character || map !== this.map) {
+      return true;
+    }
+
+    const playerTile = map.quantize(
+      this.main_character.position.clone().sub(offset)
+    );
+
+    return !(playerTile.row === tile.row && playerTile.col === tile.col);
+  }
+
+  // create npcs with visual loading feedback
+  createNPCs(numNPCs = 10) {
+    this.modelsLoading += numNPCs;
+
+    for (let i = 0; i < numNPCs; i++) {
+      let randomTile =
+        this.map.walkableTiles[
+          Math.floor(Math.random() * this.map.walkableTiles.length)
+        ];
+      let position = this.map.localize(randomTile);
+
+      let npc = new DynamicEntity({
+        position: position,
+        velocity: new THREE.Vector3(0, 0, 0),
+        color: 0xffaa33,
+        scale: new THREE.Vector3(1, 1, 1)
+      });
+
+      npc.mesh.rotation.y = Math.random() * Math.PI * 2;
+      npc.boatLoaded = false;
+
+      const tempGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+      const tempMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffaa33,
+        emissive: 0x442200,
+        transparent: true,
+        opacity: 0.7
+      });
+      const tempCube = new THREE.Mesh(tempGeometry, tempMaterial);
+      tempCube.position.set(0, 0.75, 0);
+      npc.mesh.add(tempCube);
+
+      const indicatorGeo = new THREE.ConeGeometry(0.3, 0.8, 8);
+      const indicatorMat = new THREE.MeshStandardMaterial({ color: 0xffff00 });
+      const indicator = new THREE.Mesh(indicatorGeo, indicatorMat);
+      indicator.position.set(0, 1.8, 0);
+      indicator.userData = { spinSpeed: 0.1 };
+      npc.mesh.add(indicator);
+      npc.loadingIndicator = indicator;
+
+      const loader = new GLTFLoader();
+      loader.load(
+        '/animated_drone/scene.gltf',
+        (gltf) => {
+          const model = gltf.scene;
+          const currentRotation = npc.mesh.rotation.y;
+
+          while (npc.mesh.children.length > 0) {
+            npc.mesh.remove(npc.mesh.children[0]);
+          }
+
+          model.scale.set(10, 10, 10);
+          model.position.set(0, -0.5, 0);
+
+          const box = new THREE.Box3().setFromObject(model);
+          model.position.y = -box.min.y;
+          model.userData.forwardAxis = 'x';
+
+          npc.mesh.add(model);
+          npc.boatModel = model;
+          npc.boatLoaded = true;
+          npc.color = 0xff3333;
+          npc.mesh.rotation.y = currentRotation;
+
+          if (gltf.animations && gltf.animations.length > 0) {
+            const mixer = new THREE.AnimationMixer(model);
+            const action = mixer.clipAction(gltf.animations[0]);
+            action.play();
+            npc.mixer = mixer;
+            this.mixers.push(mixer);
+          }
+
+          this.modelsLoaded++;
+          this.updateLoadingIndicator();
+        },
+        undefined,
+        () => {
+          if (npc.mesh.children[0]) {
+            npc.mesh.children[0].material.color.setHex(0xff0000);
+          }
+
+          npc.boatLoaded = true;
+          npc.loadError = true;
+
+          this.modelsLoaded++;
+          this.updateLoadingIndicator();
+        }
+      );
+
+      this.npcs.push(npc);
+      this.addEntityToWorld(npc);
+    }
+  }
+
+  // create decorative NPCs in maze 2 with offset positions
   createNPCsForMap(map, offset, numNPCs = 10) {
     this.modelsLoading += numNPCs;
 
@@ -581,238 +1054,25 @@ connectSideToInterior(map, row, side = 'left') {
     }
   }
 
-  // Create a loading indicator in the scene
-  createLoadingIndicator() {
-    // Create a text sprite or simple indicator
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = 'white';
-    ctx.font = 'bold 24px Arial';
-    ctx.fillText('Loading boats...', 10, 50);
+  updateEnergyCells(dt) {
+    if (!this.main_character || this.energyCells.length === 0) {
+      return;
+    }
 
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({ map: texture });
-    this.loadingSprite = new THREE.Sprite(material);
-    this.loadingSprite.position.set(0, 5, 0);
-    this.loadingSprite.scale.set(5, 2.5, 1);
-    this.scene.add(this.loadingSprite);
-  }
-
-  // Update loading indicator
-  updateLoadingIndicator() {
-  if (this.loadingComplete) {
-    return;
-  }
-
-  if (!this.loadingSprite) {
-    return;
-  }
-
-  const progress = this.modelsLoading > 0
-    ? (this.modelsLoaded / this.modelsLoading) * 100
-    : 0;
-
-  // Update canvas text
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = 'white';
-  ctx.font = 'bold 24px Arial';
-  ctx.fillText(`Loading: ${Math.round(progress)}%`, 10, 50);
-
-  // Draw progress bar
-  ctx.fillStyle = '#333';
-  ctx.fillRect(10, 70, 200, 20);
-  ctx.fillStyle = '#0f0';
-  ctx.fillRect(10, 70, 200 * (progress / 100), 20);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  this.loadingSprite.material.map = texture;
-  this.loadingSprite.material.needsUpdate = true;
-
-  if (
-    this.modelsLoaded >= this.modelsLoading &&
-    this.modelsLoading > 0
-  ) {
-    this.loadingComplete = true;
-    setTimeout(() => {
-      if (this.loadingSprite && this.loadingSprite.parent) {
-        this.scene.remove(this.loadingSprite);
+    for (let cell of this.energyCells) {
+      if (cell.collected) {
+        continue;
       }
-      this.loadingSprite = null;
-    }, 2000);
-  }
-}
 
+      cell.update(dt);
 
-  // create 10 ground attackers in the first maze (for vector pathfinding testing)
-  createGroundAttackers(numAttackers = 10) {
-  this.ground_attackers = [];
-
-  for (let i = 0; i < numAttackers; i++) {
-    let attackerTile;
-    let attackerPosition;
-    let tries = 0;
-
-    do {
-      attackerTile = this.map.getRandomWalkableTile();
-      attackerPosition = this.map.localize(attackerTile);
-      tries++;
-    } while (
-      tries < 300 &&
-      (
-        attackerPosition.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
-        attackerPosition.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
-        this.ground_attackers.some(a => a.position.distanceTo(attackerPosition) < 5)
-      )
-    );
-
-    let attacker = new DynamicEntity({
-      position: attackerPosition.clone(),
-      velocity: new THREE.Vector3(0, 0, 0),
-      color: 0x660000,
-      scale: new THREE.Vector3(1, 0.75, 1)
-    });
-
-    attacker.boatLoaded = true;
-    attacker.position.y = 1;
-
-    this.ground_attackers.push(attacker);
-    this.addEntityToWorld(attacker);
-  }
-}
-
-  // create 5 random goal in the world
-  // create goals in the world with pier models
-  // create goals in the world with pier models
-  
-  // create npcs with visual loading feedback
-  createNPCs(numNPCs = 10) {
-    this.modelsLoading = numNPCs;
-    this.modelsLoaded = 0;
-
-    for (let i = 0; i < numNPCs; i++) {
-      let randomTile =
-        this.map.walkableTiles[
-          Math.floor(Math.random() * this.map.walkableTiles.length)
-        ];
-      let position = this.map.localize(randomTile);
-
-      // Create NPC entity with a temporary loading cube
-      let npc = new DynamicEntity({
-        position: position,
-        velocity: new THREE.Vector3(0, 0, 0),
-        color: 0xffaa33, // Orange color for loading
-        scale: new THREE.Vector3(1, 1, 1)
-      });
-
-      // Set initial rotation to face a random direction
-      npc.mesh.rotation.y = Math.random() * Math.PI * 2;
-
-      // Add a flag to indicate if boat is loaded
-      npc.boatLoaded = false;
-
-      // Add a temporary cube that shows it's loading
-      const tempGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-      const tempMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffaa33,
-        emissive: 0x442200,
-        transparent: true,
-        opacity: 0.7
-      });
-      const tempCube = new THREE.Mesh(tempGeometry, tempMaterial);
-      tempCube.position.set(0, 0.75, 0);
-      npc.mesh.add(tempCube);
-
-      // Add a spinning indicator
-      const indicatorGeo = new THREE.ConeGeometry(0.3, 0.8, 8);
-      const indicatorMat = new THREE.MeshStandardMaterial({
-        color: 0xffff00
-      });
-      const indicator = new THREE.Mesh(indicatorGeo, indicatorMat);
-      indicator.position.set(0, 1.8, 0);
-      indicator.userData = { spinSpeed: 0.1 };
-      npc.mesh.add(indicator);
-      npc.loadingIndicator = indicator;
-
-      // Load boat model
-      const loader = new GLTFLoader();
-      loader.load(
-        '/animated_drone/scene.gltf',
-        (gltf) => {
-          const model = gltf.scene;
-          console.log('Boat model loaded:', gltf.scene);
-
-          const currentRotation = npc.mesh.rotation.y;
-
-          // Remove temporary loading visuals
-          while (npc.mesh.children.length > 0) {
-            npc.mesh.remove(npc.mesh.children[0]);
-          }
-
-          // Scale and position the boat
-          model.scale.set(10, 10, 10);
-          model.position.set(0, -0.5, 0);
-
-          // Center the boat on ground
-          const box = new THREE.Box3().setFromObject(model);
-          model.position.y = -box.min.y;
-
-          model.userData.forwardAxis = 'x';
-
-          // Add the boat model WITHOUT rotating it first
-          npc.mesh.add(model);
-
-          // Store reference to the boat model for rotation calculations
-          npc.boatModel = model;
-
-          // Mark boat as loaded
-          npc.boatLoaded = true;
-
-          // Update color to final color
-          npc.color = 0xff3333;
-
-          // Restore the rotation we had
-          npc.mesh.rotation.y = currentRotation;
-
-          // Handle animations
-          if (gltf.animations && gltf.animations.length > 0) {
-            const mixer = new THREE.AnimationMixer(model);
-            const action = mixer.clipAction(gltf.animations[0]);
-            action.play();
-            npc.mixer = mixer;
-            this.mixers.push(mixer);
-          }
-
-          // Track loading progress
-          this.modelsLoaded++;
-
-          // Update loading indicator
-          this.updateLoadingIndicator();
-        },
-        (progress) => {
-          // Optional: show per-NPC progress
-        },
-        (error) => {
-          // Make the loading cube red to show error
-          if (npc.mesh.children[0]) {
-            npc.mesh.children[0].material.color.setHex(0xff0000);
-          }
-
-          // Mark as loaded (with error) so it can be considered for movement if needed
-          npc.boatLoaded = true;
-          npc.loadError = true;
-
-          this.modelsLoaded++;
-          this.updateLoadingIndicator();
-        }
-      );
-
-      this.npcs.push(npc);
-      this.addEntityToWorld(npc);
+      if (
+        this.main_character.position.distanceTo(cell.position) <=
+        this.energyCellCollectionRadius
+      ) {
+        cell.collect();
+        this.collectedEnergyCells++;
+      }
     }
   }
 
@@ -823,32 +1083,22 @@ connectSideToInterior(map, row, side = 'left') {
   }
 
   // ----- Movement and animation methods (steering based) -----
-  respawnGroundAttacker(npc) {
-  let spawnTile;
-  let spawnPos;
-  let tries = 0;
+  respawnDrone(npc) {
+  const spawnTile = this.getValidDroneSpawnTile(this.map, this.drones.filter((drone) => drone !== npc));
+  const spawnPos = this.map.localize(spawnTile);
 
-  do {
-    spawnTile = this.map.getRandomWalkableTile();
-    spawnPos = this.map.localize(spawnTile);
-    tries++;
-  } while (
-    tries < 300 &&
-    (
-      spawnPos.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
-      spawnPos.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
-      this.ground_attackers.some(a =>
-        a !== npc && a.position.distanceTo(spawnPos) < 5
-      )
-    )
-  );
-
-  npc.position.copy(spawnPos);
-  npc.position.y = 1;
-
-  npc.velocity.set(0, 0, 0);
-  if (npc.acceleration) npc.acceleration.set(0, 0, 0);
+  npc.spawnTile = spawnTile;
+  npc.homeTile = spawnTile;
+  npc.resetToSpawn(spawnPos);
 }
+
+  startDroneRespawnCooldown(npc) {
+    npc.respawnTimer = this.groundAttackerRespawnDelay;
+    npc.velocity.set(0, 0, 0);
+    if (npc.acceleration) npc.acceleration.set(0, 0, 0);
+    npc.mesh.visible = false;
+    npc.position.y = -100;
+  }
 
   // Update main character movement using steering behaviours
   updateMainCharacter(dt) {
@@ -1059,41 +1309,40 @@ snapEntityToWalkableTile(entity) {
   }
 }
 
-// add wander behaviour for ground attacker
-updateGroundAttackers() {
-  if (!this.ground_attackers || this.ground_attackers.length === 0) return;
-  if (!this.doorGoal || !this.groundVectorPathFinding) return;
+// Update FSM-driven drone gameplay behaviour.
+updateDrones(dt) {
+  if (!this.drones || this.drones.length === 0) return;
 
-  for (let npc of this.ground_attackers) {
-    npc.position.y = 1;
-    if (npc.velocity) npc.velocity.y = 0;
-    if (npc.acceleration) npc.acceleration.y = 0;
+  for (let drone of this.drones) {
+    if (drone.respawnTimer > 0) {
+      drone.respawnTimer -= dt;
 
-    const currentTile = this.map.quantize(npc.position);
+      if (drone.respawnTimer <= 0) {
+        this.respawnDrone(drone);
+      }
 
-    // respawn as soon as attacker reaches the goal tile
-    if (
-      currentTile &&
-      currentTile.row === this.doorGoal.row &&
-      currentTile.col === this.doorGoal.col
-    ) {
-      this.respawnGroundAttacker(npc);
       continue;
     }
-  }
 
-  this.groundVectorPathFinding.runVectorFieldPathFinding(this.doorGoal);
+    drone.position.y = 1;
+    if (drone.velocity) drone.velocity.y = 0;
+    if (drone.acceleration) drone.acceleration.y = 0;
+    drone.updateFSM(dt, {
+      player: this.main_character,
+      world: this
+    });
+  }
 
   const minX = this.map.minX + 1;
   const maxX = this.map.minX + this.map.cols * this.map.tileSize - 1;
   const minZ = this.map.minZ + 1;
   const maxZ = this.map.minZ + this.map.rows * this.map.tileSize - 1;
 
-  for (let npc of this.ground_attackers) {
-    npc.position.x = THREE.MathUtils.clamp(npc.position.x, minX, maxX);
-    npc.position.z = THREE.MathUtils.clamp(npc.position.z, minZ, maxZ);
-    this.snapEntityToWalkableTile(npc);
-    npc.position.y = 1;
+  for (let drone of this.drones) {
+    drone.position.x = THREE.MathUtils.clamp(drone.position.x, minX, maxX);
+    drone.position.z = THREE.MathUtils.clamp(drone.position.z, minZ, maxZ);
+    this.snapEntityToWalkableTile(drone);
+    drone.position.y = 1;
   }
 }
 
@@ -1329,13 +1578,21 @@ reset() {
   }
 
   this.entities = [];
-  this.ground_attackers = [];
-  this.goals = [];
+  this.drones = [];
   this.npcs = [];
+  this.energyCells = [];
   this.mixers = [];
+  this.collectedEnergyCells = 0;
+  this.totalEnergyCells = 0;
+  this.energyCellsRequiredForUnlock = 0;
+  this.controllerExit = null;
+  this.controllerExitTile = null;
+  this.controllerExitUnlocked = false;
+  this.controllerExitReached = false;
 
-  this.main_character = null;
-  this.groundVectorPathFinding = null;
+	  this.main_character = null;
+	  this.groundVectorPathFinding = null;
+	  this.droneHierarchicalPathfinder = null;
   this.mazeGroup1 = null;
   this.mazeGroup2 = null;
   this.hallwayMesh = null;
@@ -1343,6 +1600,10 @@ reset() {
 
   this.dungeonGroup = null;
   this.dungeonRenderer = null;
+  this.dungeonGuard = null;
+  this.dungeonPatrolTiles = [];
+  this.dungeonPatrolPath = [];
+  this.dungeonPatrolLine = null;
   this.dungeonMap = null;
   this.hallwayMesh2 = null;
   this.hallwayBounds2 = null;
@@ -1392,8 +1653,7 @@ reset() {
     mixer.update(dt);
   }
 
-  //updateGroundAttacker with new steering behaviours
-  this.updateGroundAttackers();
+  this.updateDrones(dt);
 
   // Update all entities (this includes the main character)
   for (let e of this.entities) {
@@ -1401,6 +1661,9 @@ reset() {
       e.update(dt, this.getMapAdapterForPosition(e.position));
     }
   }
+
+  this.updateEnergyCells(dt);
+  this.updateControllerExitState(dt);
 
   // keep player stable inside dungeon bounds
   if (this.main_character) {

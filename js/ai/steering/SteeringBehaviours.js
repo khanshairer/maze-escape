@@ -81,31 +81,38 @@ export class SteeringBehaviours {
 
   }
 
-  // Wander
-  static wander(entity, d = 5, r = 2, a = 0.3) {
+  // Wander using the classic projected-circle approach.
+  static wander(entity, {
+    distance = 3.2,
+    radius = 1.7,
+    jitter = 0.55
+  } = {}) {
 
-    // First iteration, set to random angle between 0 and 2PI
-    if (!entity.wanderAngle) {
-      entity.wanderAngle = Math.random() * 2 * Math.PI;
+    if (entity.wanderAngle === undefined) {
+      entity.wanderAngle = Math.random() * Math.PI * 2;
     }
-    
-    // Predict a future position d away
-    let target = entity.velocity.clone().setLength(d);
-    target.add(entity.position);
 
-    // Convert polar to cartesian
-    let x = r * Math.sin(entity.wanderAngle);
-    let z = r * Math.cos(entity.wanderAngle);
+    let forward = entity.velocity.clone();
+    if (forward.lengthSq() < 0.0001) {
+      forward.set(0, 0, 1);
+    } else {
+      forward.normalize();
+    }
 
-    // Add to future prediction
-    target.add(new THREE.Vector3(x, 0, z));
+    const circleCenter = entity.position
+      .clone()
+      .add(forward.multiplyScalar(distance));
 
-    // Update wander angle
-    entity.wanderAngle += Math.random() * 2 * a - a;
-    
-    // Return seek to target
+    entity.wanderAngle += (Math.random() * 2 - 1) * jitter;
+
+    const offset = new THREE.Vector3(
+      Math.sin(entity.wanderAngle) * radius,
+      0,
+      Math.cos(entity.wanderAngle) * radius
+    );
+
+    const target = circleCenter.add(offset);
     return SteeringBehaviours.seek(entity, target);
-
   }
 
 }

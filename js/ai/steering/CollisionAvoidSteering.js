@@ -5,6 +5,114 @@ import { SteeringBehaviours } from './SteeringBehaviours.js';
 
 export class CollisionAvoidSteering {
 
+  // Predictive containment against the outer map bounds.
+  static bounds(entity, map, lookAhead = 1.5, margin = 1.2) {
+    if (!map) {
+      return new THREE.Vector3();
+    }
+
+    const predicted = entity.position
+      .clone()
+      .add(entity.velocity.clone().multiplyScalar(lookAhead));
+
+    const minX = map.minX + margin;
+    const maxX = map.minX + map.cols * map.tileSize - margin;
+    const minZ = map.minZ + margin;
+    const maxZ = map.minZ + map.rows * map.tileSize - margin;
+
+    const target = predicted.clone();
+    let needsAvoid = false;
+
+    if (predicted.x < minX) {
+      target.x = minX + margin * 0.5;
+      needsAvoid = true;
+    } else if (predicted.x > maxX) {
+      target.x = maxX - margin * 0.5;
+      needsAvoid = true;
+    }
+
+    if (predicted.z < minZ) {
+      target.z = minZ + margin * 0.5;
+      needsAvoid = true;
+    } else if (predicted.z > maxZ) {
+      target.z = maxZ - margin * 0.5;
+      needsAvoid = true;
+    }
+
+    if (!needsAvoid) {
+      return new THREE.Vector3();
+    }
+
+    return SteeringBehaviours.seek(entity, target);
+  }
+
+  // Predictive steering away from blocked tile edges in the current maze.
+  static tileWalls(entity, map, lookAhead = 1.1, probeOffset = 0.9) {
+    if (!map) {
+      return new THREE.Vector3();
+    }
+
+    const forward = entity.velocity.clone();
+    if (forward.lengthSq() < 0.0001) {
+      return new THREE.Vector3();
+    }
+
+    forward.normalize();
+    const predicted = entity.position
+      .clone()
+      .add(forward.clone().multiplyScalar(lookAhead));
+
+    const tile = map.quantize(predicted);
+    if (!tile || !tile.isWalkable()) {
+      return new THREE.Vector3();
+    }
+
+    const tileCenter = map.localize(tile);
+    const neighbours = map.getNeighbours(tile);
+    const half = map.tileSize / 2;
+    const avoidTarget = predicted.clone();
+    let needsAvoid = false;
+
+    const northWalkable =
+      tile.row > 0 &&
+      neighbours.includes(map.grid[tile.row - 1][tile.col]);
+    const southWalkable =
+      tile.row < map.rows - 1 &&
+      neighbours.includes(map.grid[tile.row + 1][tile.col]);
+    const westWalkable =
+      tile.col > 0 &&
+      neighbours.includes(map.grid[tile.row][tile.col - 1]);
+    const eastWalkable =
+      tile.col < map.cols - 1 &&
+      neighbours.includes(map.grid[tile.row][tile.col + 1]);
+
+    if (!northWalkable && predicted.z < tileCenter.z - (half - probeOffset)) {
+      avoidTarget.z = tileCenter.z - (half - probeOffset);
+      needsAvoid = true;
+    }
+
+    if (!southWalkable && predicted.z > tileCenter.z + (half - probeOffset)) {
+      avoidTarget.z = tileCenter.z + (half - probeOffset);
+      needsAvoid = true;
+    }
+
+    if (!westWalkable && predicted.x < tileCenter.x - (half - probeOffset)) {
+      avoidTarget.x = tileCenter.x - (half - probeOffset);
+      needsAvoid = true;
+    }
+
+    if (!eastWalkable && predicted.x > tileCenter.x + (half - probeOffset)) {
+      avoidTarget.x = tileCenter.x + (half - probeOffset);
+      needsAvoid = true;
+    }
+
+    if (!needsAvoid) {
+      return new THREE.Vector3();
+    }
+
+    return SteeringBehaviours.seek(entity, avoidTarget);
+  }
+
   // Produces a steering behaviour to 
   // avoid a round obstacle
   static round(entity, obstacle, lookAhead, howFar, debug) {

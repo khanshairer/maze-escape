@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SteeringBehaviours } from './SteeringBehaviours';
+import { SteeringBehaviours } from './SteeringBehaviours.js';
 
 
 export class PathFollowSteering {

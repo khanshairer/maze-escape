@@ -3,10 +3,11 @@ export class Game {
   constructor(world) {
     this.world = world;
     this.isGameOver = false;
+    this.isGameWon = false;
 
     // listen for restart key
     window.addEventListener('keydown', (e) => {
-      if (e.key.toLowerCase() === 'r' && this.isGameOver) {
+      if (e.key.toLowerCase() === 'r' && (this.isGameOver || this.isGameWon)) {
         this.restart();
       }
     });
@@ -14,14 +15,18 @@ export class Game {
 
   // check collision between player and attackers
   checkCollision() {
-    if (this.isGameOver) return;
+    if (this.isGameOver || this.isGameWon) return;
 
     const player = this.world.main_character;
-    const attackers = this.world.ground_attackers;
+    const attackers = this.world.drones;
 
     if (!player || !attackers) return;
 
     for (let npc of attackers) {
+      if (npc.respawnTimer > 0 || !npc.mesh.visible) {
+        continue;
+      }
+
       const distance = player.position.distanceTo(npc.position);
 
       if (distance < 1.5) {
@@ -31,9 +36,17 @@ export class Game {
     }
   }
 
+  checkWinCondition() {
+    if (this.isGameOver || this.isGameWon) return;
+
+    if (this.world.isPlayerAtUnlockedControllerExit()) {
+      this.gameWon();
+    }
+  }
+
   // GAME OVER
   gameOver() {
-    if (this.isGameOver) return;
+    if (this.isGameOver || this.isGameWon) return;
 
     this.isGameOver = true;
     console.log("GAME OVER");
@@ -44,7 +57,7 @@ export class Game {
     }
 
     // stop attackers
-    for (let npc of this.world.ground_attackers) {
+    for (let npc of this.world.drones) {
       npc.velocity.set(0, 0, 0);
     }
 
@@ -52,19 +65,38 @@ export class Game {
     this.world.isGameOver = true;
 
     // UI
-    this.showGameOverUI();
+    this.showOverlay("GAME OVER\nPress R to Restart", "red");
+  }
+
+  gameWon() {
+    if (this.isGameOver || this.isGameWon) return;
+
+    this.isGameWon = true;
+    this.world.controllerExitReached = true;
+    console.log("YOU WIN");
+
+    if (this.world.main_character) {
+      this.world.main_character.velocity.set(0, 0, 0);
+    }
+
+    for (let npc of this.world.drones) {
+      npc.velocity.set(0, 0, 0);
+    }
+
+    this.world.isGameOver = true;
+    this.showOverlay("CONTROLLER ROOM SECURED\nYOU ESCAPED\nPress R to Restart", "#33ff99");
   }
 
   // UI overlay
-  showGameOverUI() {
+  showOverlay(message, color) {
     this.overlay = document.createElement("div");
-    this.overlay.innerText = "GAME OVER\nPress R to Restart";
+    this.overlay.innerText = message;
     this.overlay.style.position = "absolute";
     this.overlay.style.top = "50%";
     this.overlay.style.left = "50%";
     this.overlay.style.transform = "translate(-50%, -50%)";
     this.overlay.style.fontSize = "40px";
-    this.overlay.style.color = "red";
+    this.overlay.style.color = color;
     this.overlay.style.textAlign = "center";
     document.body.appendChild(this.overlay);
   }
@@ -79,6 +111,7 @@ export class Game {
   }
 
   this.isGameOver = false;
+  this.isGameWon = false;
   this.world.isGameOver = false;
 
   this.world.reset();
@@ -87,8 +120,9 @@ export class Game {
 
   // called every frame
   update() {
-    if (this.isGameOver) return;
+    if (this.isGameOver || this.isGameWon) return;
 
     this.checkCollision();
+    this.checkWinCondition();
   }
 }
