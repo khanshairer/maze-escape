@@ -8,7 +8,7 @@ import { DynamicEntity } from './entities/DynamicEntity.js';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js';
 import { DebugVisuals } from './debug/DebugVisuals.js';
-
+import { DungeonGenerator } from './pcg/DungeonGenerator.js';
 /**
  * World class holds all information about our game's world
  */
@@ -72,6 +72,8 @@ init() {
   // ----- create two mazes -----
   this.map = new TileMap(2);
   this.map2 = new TileMap(2);
+  this.dungeonMap = new TileMap(2);
+  DungeonGenerator.generate(this.dungeonMap, 4);
 
   Setup.createLight(this.scene);
   Setup.showHelpers(this.scene, this.camera, this.renderer, this.map);
@@ -90,7 +92,6 @@ init() {
   let row1 = this.findClosestWalkableRow(this.map, preferredRow, 'right');
   let row2 = this.findClosestWalkableRow(this.map2, preferredRow, 'left');
 
-  // use same row if possible
   this.connectionRow = row1;
   if (this.map2.grid[this.connectionRow] && this.map2.grid[this.connectionRow][1].isWalkable()) {
     row2 = this.connectionRow;
@@ -102,17 +103,42 @@ init() {
   this.openMazeSide(this.map, row1, 'right');
   this.openMazeSide(this.map2, row2, 'left');
 
+  // ================================
+  // THIRD DUNGEON
+  // ================================
+
+  this.dungeonGap = 4;
+  this.map2WorldWidth = this.map2.cols * this.map2.tileSize;
+
+  this.dungeonOffset = new THREE.Vector3(
+    this.map2Offset.x + this.map2WorldWidth + this.dungeonGap,
+    0,
+    0
+  );
+
+  // ----- create hallway connection between map 2 and dungeon -----
+  let row3 = this.findClosestWalkableRow(this.dungeonMap, preferredRow, 'left');
+  let rowMap2ToDungeon = this.findClosestWalkableRow(this.map2, preferredRow, 'right');
+
+  this.openMazeSide(this.map2, rowMap2ToDungeon, 'right');
+  this.openMazeSide(this.dungeonMap, row3, 'left');
+
+  // ONLY connect the dungeon door into the dungeon interior
+  // do NOT carve through map2, that breaks maze2 movement
+  this.connectSideToInterior(this.dungeonMap, row3, 'left');
+
   this.map.walkableTiles = this.map.grid.flat().filter(tile => tile.isWalkable());
   this.map2.walkableTiles = this.map2.grid.flat().filter(tile => tile.isWalkable());
+  this.dungeonMap.walkableTiles = this.dungeonMap.grid.flat().filter(tile => tile.isWalkable());
 
-  // ----- render first maze in its own group -----
+  // ----- render first maze -----
   this.mazeGroup1 = new THREE.Group();
   this.scene.add(this.mazeGroup1);
 
   this.tileMapRenderer = new TileMapRenderer(this.map);
   this.tileMapRenderer.render(this.mazeGroup1);
 
-  // ----- render second maze in its own group -----
+  // ----- render second maze -----
   this.mazeGroup2 = new THREE.Group();
   this.mazeGroup2.position.copy(this.map2Offset);
   this.scene.add(this.mazeGroup2);
@@ -120,16 +146,28 @@ init() {
   this.tileMapRenderer2 = new TileMapRenderer(this.map2);
   this.tileMapRenderer2.render(this.mazeGroup2);
 
-  // ----- render hallway between them -----
+  this.dungeonGroup = new THREE.Group();
+  this.dungeonGroup.position.copy(this.dungeonOffset);
+  this.scene.add(this.dungeonGroup);
+
+  this.dungeonRenderer = new TileMapRenderer(this.dungeonMap);
+  this.dungeonRenderer.render(this.dungeonGroup);
+
+  // ================================
+
+  // ----- render hallway between map 1 and map 2 -----
   this.createHallway(row1, row2);
 
-  // -------- DOOR GOAL (for vector pathfinding) --------
+  // ----- render hallway between map 2 and dungeon -----
+  this.createHallwayBetweenMap2AndDungeon(rowMap2ToDungeon, row3);
+
+  // -------- DOOR GOAL --------
   this.doorGoal = this.map.grid[row1][this.map.cols - 1];
   if (!this.doorGoal.isWalkable()) {
     this.doorGoal = this.map.grid[row1][this.map.cols - 2];
   }
 
-  // Create main character on the ground – set topSpeed so it respects max speed
+  // main character
   this.main_character = new DynamicEntity({
     position: new THREE.Vector3(0, 0, 0),
     velocity: new THREE.Vector3(0, 0, 0),
@@ -138,10 +176,10 @@ init() {
     scale: new THREE.Vector3(1, 1, 1)
   });
 
-  // create ground attackers for vector pathfinding testing
+  // attackers
   this.createGroundAttackers(10);
 
-  // -------- VECTOR PATHFINDING FOR ATTACKER --------
+  // vector pathfinding
   this.groundVectorPathFinding = new VectorPathFinding(
     this.map,
     this.ground_attackers,
@@ -152,7 +190,7 @@ init() {
   this.groundVectorPathFinding.buildCostField(this.doorGoal);
   this.groundVectorPathFinding.allTileArrows(this.doorGoal);
 
-  // ----- Load officer_with_gun model for main character -----
+  // ----- MAIN CHARACTER LOADING -----
   const tempCubeGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
   const tempCubeMat = new THREE.MeshStandardMaterial({
     color: 0x33aaff,
@@ -177,20 +215,17 @@ init() {
     '/officer_with_gun/scene.gltf',
     (gltf) => {
       const model = gltf.scene;
-      console.log('Main character model loaded:', gltf.scene);
 
       while (this.main_character.mesh.children.length > 0) {
         this.main_character.mesh.remove(this.main_character.mesh.children[0]);
       }
 
       model.scale.set(1.8, 1.8, 1.8);
-      model.position.set(0, -0.5, 0);
 
       const box = new THREE.Box3().setFromObject(model);
       model.position.y = -box.min.y;
 
       this.main_character.mesh.add(model);
-      this.main_character.model = model;
 
       if (gltf.animations && gltf.animations.length > 0) {
         const mixer = new THREE.AnimationMixer(model);
@@ -207,32 +242,15 @@ init() {
           this.currentMainAction = idleAction;
         }
       }
-
-      this.main_character.color = 0x44aaff;
-    },
-    undefined,
-    (error) => {
-      console.error('Error loading officer_with_gun model:', error);
-      if (this.main_character.mesh.children[0]) {
-        this.main_character.mesh.children[0].material.color.setHex(0xff0000);
-        this.main_character.mesh.children[0].material.transparent = false;
-      }
-      if (this.main_character.loadingRing) {
-        this.main_character.loadingRing.material.color.setHex(0xff0000);
-      }
     }
   );
 
   this.addEntityToWorld(this.main_character);
 
-  // first maze content
   this.createGoals(5);
-
   this.createLoadingIndicator();
-
   this.createNPCs(10);
 
-  // second maze content
   this.createGoalsForMap(this.map2, this.map2Offset, 5);
   this.createNPCsForMap(this.map2, this.map2Offset, 10);
 }
@@ -260,6 +278,8 @@ init() {
       map.grid[row][1].type = Tile.Type.EasyTerrain;
     }
   }
+
+
 
   createHallway(row1, row2) {
     const startTile1 = this.map.grid[row1][this.map.cols - 1];
@@ -309,24 +329,156 @@ init() {
     }
   }
 
-  isInHallway(position) {
-    if (!this.hallwayBounds) return false;
+  // create doorway connection between maze 2 and dungeon
+  createHallwayBetweenMap2AndDungeon(row2, row3) {
+  const startTile2 = this.map2.grid[row2][this.map2.cols - 1];
+  const startTile3 = this.dungeonMap.grid[row3][0];
 
-    return (
+  const p2 = this.map2.localize(startTile2).clone().add(this.map2Offset);
+  const p3 = this.dungeonMap.localize(startTile3).clone().add(this.dungeonOffset);
+
+  const hallwayY = 0.02;
+  const hallwayThickness = 0.05;
+  const hallwayDepth = this.map2.tileSize;
+
+  const straightCenterX = (p2.x + p3.x) / 2;
+  const straightCenterZ = p2.z;
+  const straightWidth = Math.abs(p3.x - p2.x);
+
+  const straightGeo = new THREE.BoxGeometry(straightWidth, hallwayThickness, hallwayDepth);
+  const straightMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0 });
+  const straightHall = new THREE.Mesh(straightGeo, straightMat);
+  straightHall.position.set(straightCenterX, hallwayY, straightCenterZ);
+  this.scene.add(straightHall);
+
+  this.hallwayMesh2 = straightHall;
+
+  this.hallwayBounds2 = {
+    minX: Math.min(p2.x, p3.x),
+    maxX: Math.max(p2.x, p3.x),
+    minZ: p2.z - hallwayDepth / 2,
+    maxZ: p2.z + hallwayDepth / 2
+  };
+
+  if (p2.z !== p3.z) {
+    const verticalDepth = Math.abs(p3.z - p2.z) + hallwayDepth;
+    const verticalCenterZ = (p2.z + p3.z) / 2;
+
+    const verticalGeo = new THREE.BoxGeometry(this.map2.tileSize, hallwayThickness, verticalDepth);
+    const verticalMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0 });
+    const verticalHall = new THREE.Mesh(verticalGeo, verticalMat);
+    verticalHall.position.set(p3.x, hallwayY, verticalCenterZ);
+    this.scene.add(verticalHall);
+
+    this.hallwayBounds2.minX = Math.min(this.hallwayBounds2.minX, p3.x - this.map2.tileSize / 2);
+    this.hallwayBounds2.maxX = Math.max(this.hallwayBounds2.maxX, p3.x + this.map2.tileSize / 2);
+    this.hallwayBounds2.minZ = Math.min(this.hallwayBounds2.minZ, verticalCenterZ - verticalDepth / 2);
+    this.hallwayBounds2.maxZ = Math.max(this.hallwayBounds2.maxZ, verticalCenterZ + verticalDepth / 2);
+  }
+}
+
+// make sure the door of dungeon is aligned with the hallway from map 2
+connectSideToInterior(map, row, side = 'left') {
+  if (side === 'left') {
+    let foundWalkable = false;
+
+    for (let c = 0; c < map.cols; c++) {
+      if (map.grid[row][c].isWalkable()) {
+        foundWalkable = true;
+        break;
+      }
+    }
+
+    if (!foundWalkable) return;
+
+    for (let c = 0; c < map.cols; c++) {
+      map.grid[row][c].type = Tile.Type.EasyTerrain;
+      if (c > 1 && map.grid[row][c + 1] && map.grid[row][c + 1].isWalkable()) {
+        break;
+      }
+    }
+  } else {
+    let foundWalkable = false;
+
+    for (let c = map.cols - 1; c >= 0; c--) {
+      if (map.grid[row][c].isWalkable()) {
+        foundWalkable = true;
+        break;
+      }
+    }
+
+    if (!foundWalkable) return;
+
+    for (let c = map.cols - 1; c >= 0; c--) {
+      map.grid[row][c].type = Tile.Type.EasyTerrain;
+      if (c < map.cols - 2 && map.grid[row][c - 1] && map.grid[row][c - 1].isWalkable()) {
+        break;
+      }
+    }
+  }
+}
+
+  isInHallway(position) {
+  let inHallway1 = false;
+  let inHallway2 = false;
+
+  if (this.hallwayBounds) {
+    inHallway1 =
       position.x >= this.hallwayBounds.minX &&
       position.x <= this.hallwayBounds.maxX &&
       position.z >= this.hallwayBounds.minZ &&
-      position.z <= this.hallwayBounds.maxZ
-    );
+      position.z <= this.hallwayBounds.maxZ;
   }
 
-  getMapForPosition(position) {
-    if (this.isInHallway(position)) {
-      return this.hallwayMap;
-    }
-
-    return position.x >= this.map2Offset.x / 2 ? this.map2 : this.map;
+  if (this.hallwayBounds2) {
+    inHallway2 =
+      position.x >= this.hallwayBounds2.minX &&
+      position.x <= this.hallwayBounds2.maxX &&
+      position.z >= this.hallwayBounds2.minZ &&
+      position.z <= this.hallwayBounds2.maxZ;
   }
+
+  return inHallway1 || inHallway2;
+}
+
+ getMapForPosition(position) {
+  if (this.isInHallway(position)) {
+    return this.hallwayMap;
+  }
+
+  const dungeonStartX = this.dungeonOffset.x - this.dungeonMap.tileSize / 2;
+  const map2StartX = this.map2Offset.x - this.map2.tileSize / 2;
+
+  if (position.x >= dungeonStartX) {
+    return {
+      handleCollisions: (entity) => {
+        const fakeEntity = {
+          ...entity,
+          position: entity.position.clone().sub(this.dungeonOffset)
+        };
+
+        const corrected = this.dungeonMap.handleCollisions(fakeEntity);
+        return corrected.add(this.dungeonOffset);
+      }
+    };
+  }
+
+  if (position.x >= map2StartX) {
+    return {
+      handleCollisions: (entity) => {
+        const fakeEntity = {
+          ...entity,
+          position: entity.position.clone().sub(this.map2Offset)
+        };
+
+        const corrected = this.map2.handleCollisions(fakeEntity);
+        return corrected.add(this.map2Offset);
+      }
+    };
+  }
+
+  return this.map;
+}
 
   // for second maze, we need to offset the positions of goals and NPCs
   createGoalsForMap(map, offset, numGoals = 5) {
@@ -982,12 +1134,44 @@ init() {
 }
 
 // for maze 2 position update 
-getMapAdapterForPosition(position) {
+getMapForPosition(position) {
   if (this.isInHallway(position)) {
     return this.hallwayMap;
   }
 
-  if (position.x >= this.map2Offset.x / 2) {
+  const inMap1 =
+    position.x >= this.map.minX &&
+    position.x <= this.map.minX + this.map.cols * this.map.tileSize &&
+    position.z >= this.map.minZ &&
+    position.z <= this.map.minZ + this.map.rows * this.map.tileSize;
+
+  const inMap2 =
+    position.x >= this.map2Offset.x + this.map2.minX &&
+    position.x <= this.map2Offset.x + this.map2.minX + this.map2.cols * this.map2.tileSize &&
+    position.z >= this.map2.minZ &&
+    position.z <= this.map2.minZ + this.map2.rows * this.map2.tileSize;
+
+  const inDungeon =
+    position.x >= this.dungeonOffset.x + this.dungeonMap.minX &&
+    position.x <= this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize &&
+    position.z >= this.dungeonMap.minZ &&
+    position.z <= this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize;
+
+  if (inDungeon) {
+    return {
+      handleCollisions: (entity) => {
+        const fakeEntity = {
+          ...entity,
+          position: entity.position.clone().sub(this.dungeonOffset)
+        };
+
+        const corrected = this.dungeonMap.handleCollisions(fakeEntity);
+        return corrected.add(this.dungeonOffset);
+      }
+    };
+  }
+
+  if (inMap2) {
     return {
       handleCollisions: (entity) => {
         const fakeEntity = {
@@ -1001,8 +1185,28 @@ getMapAdapterForPosition(position) {
     };
   }
 
-  return this.map;
+  if (inMap1) {
+    return this.map;
+  }
+
+  return this.hallwayMap;
 }
+
+// helper function to clamp position within hallway bounds (for main character)
+getMapAdapterForPosition(position) {
+  return this.getMapForPosition(position);
+}
+//clamp main character in dungeon 3 helper function
+clampPositionToDungeon(entity) {
+  const minX = this.dungeonOffset.x + this.dungeonMap.minX + 0.1;
+  const maxX = this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize - 0.1;
+  const minZ = this.dungeonMap.minZ + 0.1;
+  const maxZ = this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize - 0.1;
+
+  entity.position.x = THREE.MathUtils.clamp(entity.position.x, minX, maxX);
+  entity.position.z = THREE.MathUtils.clamp(entity.position.z, minZ, maxZ);
+}
+
 //helper for Update Ground Attacker
 getEscapeTargetFromCurrentTile(npc) {
   const tile = this.map.quantize(npc.position);
@@ -1109,50 +1313,99 @@ reset() {
   this.mazeGroup2 = null;
   this.hallwayMesh = null;
   this.loadingSprite = null;
+
+  this.dungeonGroup = null;
+  this.dungeonRenderer = null;
+  this.dungeonMap = null;
+  this.hallwayMesh2 = null;
+  this.hallwayBounds2 = null;
+  this.dungeonOffset = null;
 }
+
   // Update our world
   update() {
-    if (this.isGameOver) {
-  for (let mixer of this.mixers) {
-    mixer.stopAllAction();
+  if (this.isGameOver) {
+    for (let mixer of this.mixers) {
+      mixer.stopAllAction();
+    }
+
+    if (this.mainCharacterMixer) {
+      this.mainCharacterMixer.stopAllAction();
+    }
+
+    return;
   }
-  return;
-}  
 
-if(!this.main_character) return;
-    let dt = this.clock.getDelta();
+  if (!this.main_character) return;
 
-    // Update main character movement and animation
-    this.updateMainCharacter(dt);
+  let dt = this.clock.getDelta();
 
-    // Update main character animation mixer if present
+  if (!this.loadingComplete) {
     if (this.mainCharacterMixer) {
       this.mainCharacterMixer.update(dt);
     }
 
-    // Update animation mixers for loaded boats
     for (let mixer of this.mixers) {
       mixer.update(dt);
     }
 
-    //updateGroundAttacker with new steering behaviours
-    this.updateGroundAttackers();
+    return;
+  }
 
-    // Update all entities (this includes the main character)
-    for (let e of this.entities) {
-      if (e.update) {
-        e.update(dt, this.getMapAdapterForPosition(e.position));      }
-    }
-    // Update camera to follow main character
-    this.updateCameraFollow();
+  // Update main character movement and animation
+  this.updateMainCharacter(dt);
 
-    // Final position logging (once per second)
-    if (!this.finalLogCounter) this.finalLogCounter = 0;
-    this.finalLogCounter++;
-    if (this.finalLogCounter >= 60) {
-      this.finalLogCounter = 0;
+  // Update main character animation mixer if present
+  if (this.mainCharacterMixer) {
+    this.mainCharacterMixer.update(dt);
+  }
+
+  // Update animation mixers for loaded boats
+  for (let mixer of this.mixers) {
+    mixer.update(dt);
+  }
+
+  //updateGroundAttacker with new steering behaviours
+  this.updateGroundAttackers();
+
+  // Update all entities (this includes the main character)
+  for (let e of this.entities) {
+    if (e.update) {
+      e.update(dt, this.getMapAdapterForPosition(e.position));
     }
   }
+
+  // keep player stable inside dungeon bounds
+  if (this.main_character) {
+    const pos = this.main_character.position;
+
+    const inDungeon =
+      pos.x >= this.dungeonOffset.x + this.dungeonMap.minX &&
+      pos.x <= this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize &&
+      pos.z >= this.dungeonMap.minZ &&
+      pos.z <= this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize;
+
+    if (inDungeon) {
+      const minX = this.dungeonOffset.x + this.dungeonMap.minX + 0.1;
+      const maxX = this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize - 0.1;
+      const minZ = this.dungeonMap.minZ + 0.1;
+      const maxZ = this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize - 0.1;
+
+      this.main_character.position.x = THREE.MathUtils.clamp(this.main_character.position.x, minX, maxX);
+      this.main_character.position.z = THREE.MathUtils.clamp(this.main_character.position.z, minZ, maxZ);
+    }
+  }
+
+  // Update camera to follow main character
+  this.updateCameraFollow();
+
+  // Final position logging (once per second)
+  if (!this.finalLogCounter) this.finalLogCounter = 0;
+  this.finalLogCounter++;
+  if (this.finalLogCounter >= 60) {
+    this.finalLogCounter = 0;
+  }
+}
 
   // Render our world
   render() {
