@@ -104,7 +104,7 @@ init() {
   this.openMazeSide(this.map2, row2, 'left');
 
   // ================================
-  // THIRD DUNGEON (NEW)
+  // THIRD DUNGEON
   // ================================
 
   this.dungeonGap = 4;
@@ -122,6 +122,10 @@ init() {
 
   this.openMazeSide(this.map2, rowMap2ToDungeon, 'right');
   this.openMazeSide(this.dungeonMap, row3, 'left');
+
+  // ONLY connect the dungeon door into the dungeon interior
+  // do NOT carve through map2, that breaks maze2 movement
+  this.connectSideToInterior(this.dungeonMap, row3, 'left');
 
   this.map.walkableTiles = this.map.grid.flat().filter(tile => tile.isWalkable());
   this.map2.walkableTiles = this.map2.grid.flat().filter(tile => tile.isWalkable());
@@ -251,7 +255,6 @@ init() {
   this.createNPCsForMap(this.map2, this.map2Offset, 10);
 }
 
-
   findClosestWalkableRow(map, preferredRow, side = 'right') {
     const col = side === 'right' ? map.cols - 2 : 1;
 
@@ -374,6 +377,47 @@ init() {
   }
 }
 
+// make sure the door of dungeon is aligned with the hallway from map 2
+connectSideToInterior(map, row, side = 'left') {
+  if (side === 'left') {
+    let foundWalkable = false;
+
+    for (let c = 0; c < map.cols; c++) {
+      if (map.grid[row][c].isWalkable()) {
+        foundWalkable = true;
+        break;
+      }
+    }
+
+    if (!foundWalkable) return;
+
+    for (let c = 0; c < map.cols; c++) {
+      map.grid[row][c].type = Tile.Type.EasyTerrain;
+      if (c > 1 && map.grid[row][c + 1] && map.grid[row][c + 1].isWalkable()) {
+        break;
+      }
+    }
+  } else {
+    let foundWalkable = false;
+
+    for (let c = map.cols - 1; c >= 0; c--) {
+      if (map.grid[row][c].isWalkable()) {
+        foundWalkable = true;
+        break;
+      }
+    }
+
+    if (!foundWalkable) return;
+
+    for (let c = map.cols - 1; c >= 0; c--) {
+      map.grid[row][c].type = Tile.Type.EasyTerrain;
+      if (c < map.cols - 2 && map.grid[row][c - 1] && map.grid[row][c - 1].isWalkable()) {
+        break;
+      }
+    }
+  }
+}
+
   isInHallway(position) {
   let inHallway1 = false;
   let inHallway2 = false;
@@ -402,7 +446,10 @@ init() {
     return this.hallwayMap;
   }
 
-  if (position.x >= this.dungeonOffset.x - this.dungeonMap.tileSize) {
+  const dungeonStartX = this.dungeonOffset.x - this.dungeonMap.tileSize / 2;
+  const map2StartX = this.map2Offset.x - this.map2.tileSize / 2;
+
+  if (position.x >= dungeonStartX) {
     return {
       handleCollisions: (entity) => {
         const fakeEntity = {
@@ -416,7 +463,7 @@ init() {
     };
   }
 
-  if (position.x >= this.map2Offset.x / 2) {
+  if (position.x >= map2StartX) {
     return {
       handleCollisions: (entity) => {
         const fakeEntity = {
@@ -1087,12 +1134,30 @@ init() {
 }
 
 // for maze 2 position update 
-getMapAdapterForPosition(position) {
+getMapForPosition(position) {
   if (this.isInHallway(position)) {
     return this.hallwayMap;
   }
 
-  if (position.x >= this.dungeonOffset.x - this.dungeonMap.tileSize) {
+  const inMap1 =
+    position.x >= this.map.minX &&
+    position.x <= this.map.minX + this.map.cols * this.map.tileSize &&
+    position.z >= this.map.minZ &&
+    position.z <= this.map.minZ + this.map.rows * this.map.tileSize;
+
+  const inMap2 =
+    position.x >= this.map2Offset.x + this.map2.minX &&
+    position.x <= this.map2Offset.x + this.map2.minX + this.map2.cols * this.map2.tileSize &&
+    position.z >= this.map2.minZ &&
+    position.z <= this.map2.minZ + this.map2.rows * this.map2.tileSize;
+
+  const inDungeon =
+    position.x >= this.dungeonOffset.x + this.dungeonMap.minX &&
+    position.x <= this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize &&
+    position.z >= this.dungeonMap.minZ &&
+    position.z <= this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize;
+
+  if (inDungeon) {
     return {
       handleCollisions: (entity) => {
         const fakeEntity = {
@@ -1106,7 +1171,7 @@ getMapAdapterForPosition(position) {
     };
   }
 
-  if (position.x >= this.map2Offset.x / 2) {
+  if (inMap2) {
     return {
       handleCollisions: (entity) => {
         const fakeEntity = {
@@ -1120,8 +1185,28 @@ getMapAdapterForPosition(position) {
     };
   }
 
-  return this.map;
+  if (inMap1) {
+    return this.map;
+  }
+
+  return this.hallwayMap;
 }
+
+// helper function to clamp position within hallway bounds (for main character)
+getMapAdapterForPosition(position) {
+  return this.getMapForPosition(position);
+}
+//clamp main character in dungeon 3 helper function
+clampPositionToDungeon(entity) {
+  const minX = this.dungeonOffset.x + this.dungeonMap.minX + 0.1;
+  const maxX = this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize - 0.1;
+  const minZ = this.dungeonMap.minZ + 0.1;
+  const maxZ = this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize - 0.1;
+
+  entity.position.x = THREE.MathUtils.clamp(entity.position.x, minX, maxX);
+  entity.position.z = THREE.MathUtils.clamp(entity.position.z, minZ, maxZ);
+}
+
 //helper for Update Ground Attacker
 getEscapeTargetFromCurrentTile(npc) {
   const tile = this.map.quantize(npc.position);
@@ -1228,50 +1313,99 @@ reset() {
   this.mazeGroup2 = null;
   this.hallwayMesh = null;
   this.loadingSprite = null;
+
+  this.dungeonGroup = null;
+  this.dungeonRenderer = null;
+  this.dungeonMap = null;
+  this.hallwayMesh2 = null;
+  this.hallwayBounds2 = null;
+  this.dungeonOffset = null;
 }
+
   // Update our world
   update() {
-    if (this.isGameOver) {
-  for (let mixer of this.mixers) {
-    mixer.stopAllAction();
+  if (this.isGameOver) {
+    for (let mixer of this.mixers) {
+      mixer.stopAllAction();
+    }
+
+    if (this.mainCharacterMixer) {
+      this.mainCharacterMixer.stopAllAction();
+    }
+
+    return;
   }
-  return;
-}  
 
-if(!this.main_character) return;
-    let dt = this.clock.getDelta();
+  if (!this.main_character) return;
 
-    // Update main character movement and animation
-    this.updateMainCharacter(dt);
+  let dt = this.clock.getDelta();
 
-    // Update main character animation mixer if present
+  if (!this.loadingComplete) {
     if (this.mainCharacterMixer) {
       this.mainCharacterMixer.update(dt);
     }
 
-    // Update animation mixers for loaded boats
     for (let mixer of this.mixers) {
       mixer.update(dt);
     }
 
-    //updateGroundAttacker with new steering behaviours
-    this.updateGroundAttackers();
+    return;
+  }
 
-    // Update all entities (this includes the main character)
-    for (let e of this.entities) {
-      if (e.update) {
-        e.update(dt, this.getMapAdapterForPosition(e.position));      }
-    }
-    // Update camera to follow main character
-    this.updateCameraFollow();
+  // Update main character movement and animation
+  this.updateMainCharacter(dt);
 
-    // Final position logging (once per second)
-    if (!this.finalLogCounter) this.finalLogCounter = 0;
-    this.finalLogCounter++;
-    if (this.finalLogCounter >= 60) {
-      this.finalLogCounter = 0;
+  // Update main character animation mixer if present
+  if (this.mainCharacterMixer) {
+    this.mainCharacterMixer.update(dt);
+  }
+
+  // Update animation mixers for loaded boats
+  for (let mixer of this.mixers) {
+    mixer.update(dt);
+  }
+
+  //updateGroundAttacker with new steering behaviours
+  this.updateGroundAttackers();
+
+  // Update all entities (this includes the main character)
+  for (let e of this.entities) {
+    if (e.update) {
+      e.update(dt, this.getMapAdapterForPosition(e.position));
     }
   }
+
+  // keep player stable inside dungeon bounds
+  if (this.main_character) {
+    const pos = this.main_character.position;
+
+    const inDungeon =
+      pos.x >= this.dungeonOffset.x + this.dungeonMap.minX &&
+      pos.x <= this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize &&
+      pos.z >= this.dungeonMap.minZ &&
+      pos.z <= this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize;
+
+    if (inDungeon) {
+      const minX = this.dungeonOffset.x + this.dungeonMap.minX + 0.1;
+      const maxX = this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize - 0.1;
+      const minZ = this.dungeonMap.minZ + 0.1;
+      const maxZ = this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize - 0.1;
+
+      this.main_character.position.x = THREE.MathUtils.clamp(this.main_character.position.x, minX, maxX);
+      this.main_character.position.z = THREE.MathUtils.clamp(this.main_character.position.z, minZ, maxZ);
+    }
+  }
+
+  // Update camera to follow main character
+  this.updateCameraFollow();
+
+  // Final position logging (once per second)
+  if (!this.finalLogCounter) this.finalLogCounter = 0;
+  this.finalLogCounter++;
+  if (this.finalLogCounter >= 60) {
+    this.finalLogCounter = 0;
+  }
+}
 
   // Render our world
   render() {
