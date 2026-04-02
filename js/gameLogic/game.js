@@ -14,13 +14,15 @@ export class Game {
 
   // check collision between player and attackers
   checkCollision() {
-    if (this.isGameOver) return;
+  if (this.isGameOver) return;
 
-    const player = this.world.main_character;
-    const attackers = this.world.ground_attackers;
+  const player = this.world.main_character;
+  const attackers = this.world.ground_attackers;
+  const dungeonGuard = this.world.dungeonGuard;
 
-    if (!player || !attackers) return;
+  if (!player) return;
 
+  if (attackers) {
     for (let npc of attackers) {
       const distance = player.position.distanceTo(npc.position);
 
@@ -30,6 +32,17 @@ export class Game {
       }
     }
   }
+
+  if (dungeonGuard) {
+    const distance = player.position.distanceTo(dungeonGuard.position);
+    const catchRadius = dungeonGuard.catchRadius ?? 1.5;
+
+    if (distance < catchRadius) {
+      this.gameOver();
+      return;
+    }
+  }
+}
 
   // GAME OVER
   gameOver() {
