@@ -1406,9 +1406,9 @@ createDungeonGuard() {
   this.dungeonGuard = new DynamicEntity({
     position: new THREE.Vector3(startPos.x, 1.0, startPos.z),
     velocity: new THREE.Vector3(0, 0, 0),
-    topSpeed: 3.0,
+    topSpeed: 2.2,
     color: 0xff0000,
-    scale: new THREE.Vector3(1.2, 1.2, 1.2)
+    scale: new THREE.Vector3(1, 1, 1)
   });
 
   this.dungeonGuard.isDungeonGuard = true;
@@ -1422,32 +1422,68 @@ createDungeonGuard() {
     targetOffset: 2.0
   };
 
-  const guardBody = new THREE.Mesh(
+  this.dungeonGuard.modelFacingOffset = Math.PI;
+
+  const tempBody = new THREE.Mesh(
     new THREE.BoxGeometry(1.2, 2.0, 1.2),
     new THREE.MeshStandardMaterial({
       color: 0xff0000,
       emissive: 0x330000
     })
   );
-  guardBody.position.set(0, 1.0, 0);
-  this.dungeonGuard.mesh.add(guardBody);
+  tempBody.position.set(0, 1.0, 0);
+  this.dungeonGuard.mesh.add(tempBody);
+  this.dungeonGuard.tempBody = tempBody;
 
-  const guardHead = new THREE.Mesh(
-    new THREE.SphereGeometry(0.35, 16, 16),
-    new THREE.MeshStandardMaterial({
-      color: 0xffaaaa,
-      emissive: 0x220000
-    })
-  );
-  guardHead.position.set(0, 2.2, 0);
-  this.dungeonGuard.mesh.add(guardHead);
+  const loader = new GLTFLoader();
+  loader.load(
+    '/walking_angry_king_guard/scene.gltf',
+    (gltf) => {
+      const model = gltf.scene;
 
-  const marker = new THREE.Mesh(
-    new THREE.ConeGeometry(0.25, 0.6, 8),
-    new THREE.MeshStandardMaterial({ color: 0xffff00 })
+      if (this.dungeonGuard.tempBody) {
+        this.dungeonGuard.mesh.remove(this.dungeonGuard.tempBody);
+        this.dungeonGuard.tempBody.geometry.dispose();
+        this.dungeonGuard.tempBody.material.dispose();
+        this.dungeonGuard.tempBody = null;
+      }
+
+      while (this.dungeonGuard.mesh.children.length > 0) {
+        this.dungeonGuard.mesh.remove(this.dungeonGuard.mesh.children[0]);
+      }
+
+      model.scale.set(1.4, 1.4, 1.4);
+
+      const box = new THREE.Box3().setFromObject(model);
+      model.position.y = -box.min.y;
+
+      model.rotation.y = 0;
+
+      this.dungeonGuard.mesh.add(model);
+      this.dungeonGuard.guardModel = model;
+
+      if (gltf.animations && gltf.animations.length > 0) {
+        const mixer = new THREE.AnimationMixer(model);
+        this.dungeonGuard.mixer = mixer;
+        this.mixers.push(mixer);
+
+        const clipIndex = gltf.animations[1] ? 1 : 0;
+        const action = mixer.clipAction(gltf.animations[clipIndex]);
+        action.reset();
+        action.play();
+
+        this.dungeonGuard.currentAction = action;
+
+        console.log("✅ dungeon guard animation playing:", clipIndex);
+      } else {
+        console.log("⚠️ no animations found on walking_angry_king_guard");
+      }
+    },
+    undefined,
+    (error) => {
+      console.log("❌ failed to load walking_angry_king_guard:", error);
+    }
   );
-  marker.position.set(0, 2.9, 0);
-  this.dungeonGuard.mesh.add(marker);
 
   this.addEntityToWorld(this.dungeonGuard);
 
@@ -1456,6 +1492,7 @@ createDungeonGuard() {
 
 updateDungeonGuard(dt) {
   if (!this.dungeonGuard) return;
+  if (!this.dungeonGuard.pathFollower) return;
 
   const steering = ReynoldsPathFollowing.followLoop(this.dungeonGuard);
   this.dungeonGuard.applyForce(steering);
@@ -1475,11 +1512,17 @@ updateDungeonGuard(dt) {
   this.dungeonGuard.update(dt, dungeonAdapter);
   this.dungeonGuard.position.y = 1.0;
 
+  if (this.dungeonGuard.mixer) {
+    this.dungeonGuard.mixer.update(dt);
+  }
+
   const flatVel = this.dungeonGuard.velocity.clone();
   flatVel.y = 0;
 
   if (flatVel.lengthSq() > 0.0001) {
-    this.dungeonGuard.mesh.rotation.y = Math.atan2(flatVel.x, flatVel.z);
+    const moveAngle = Math.atan2(flatVel.x, flatVel.z);
+    const facingOffset = this.dungeonGuard.modelFacingOffset ?? 0;
+    this.dungeonGuard.mesh.rotation.y = moveAngle + facingOffset;
   }
 }
 // restart 
