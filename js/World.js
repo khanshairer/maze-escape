@@ -9,6 +9,8 @@ import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js';
 import { DebugVisuals } from './debug/DebugVisuals.js';
 import { DungeonGenerator } from './pcg/DungeonGenerator.js';
+import { JPS } from './ai/pathfinding/JPS.js';
+import { ReynoldsPathFollowing } from './ai/steering/ReynoldsPathFollowing.js';
 /**
  * World class holds all information about our game's world
  */
@@ -250,6 +252,9 @@ init() {
   this.createGoals(5);
   this.createLoadingIndicator();
   this.createNPCs(10);
+  this.createPatrolLoopInDungeon3();
+  this.drawDungeon3PatrolLoop();
+  this.createDungeonGuard();
 
   this.createGoalsForMap(this.map2, this.map2Offset, 5);
   this.createNPCsForMap(this.map2, this.map2Offset, 10);
@@ -1295,6 +1300,188 @@ updateGroundAttackers() {
   }
 }
 
+// helper function to create partol loop 
+createPatrolLoopInDungeon3() {
+  if (!this.dungeonMap.walkableTiles || this.dungeonMap.walkableTiles.length === 0) {
+    this.dungeonMap.walkableTiles =
+      this.dungeonMap.grid.flat().filter(t => t.isWalkable());
+  }
+
+  const nearestWalkable = (r, c) => {
+    let best = null;
+    let bestDist = Infinity;
+
+    for (let t of this.dungeonMap.walkableTiles) {
+      let d = Math.abs(t.row - r) + Math.abs(t.col - c);
+      if (d < bestDist) {
+        bestDist = d;
+        best = t;
+      }
+    }
+    return best;
+  };
+
+  const anchors = [
+    nearestWalkable(2, 2),
+    nearestWalkable(2, this.dungeonMap.cols - 3),
+    nearestWalkable(this.dungeonMap.rows - 3, this.dungeonMap.cols - 3),
+    nearestWalkable(this.dungeonMap.rows - 3, 2)
+  ].filter(Boolean);
+
+  const uniqueAnchors = [];
+  const seen = new Set();
+
+  for (let tile of anchors) {
+    const key = `${tile.row},${tile.col}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueAnchors.push(tile);
+    }
+  }
+
+  if (uniqueAnchors.length < 2) {
+    this.dungeonPatrolTiles = [];
+    this.dungeonPatrolPath = [];
+    return;
+  }
+
+  const pathfinder = new JPS(this.dungeonMap);
+
+  this.dungeonPatrolTiles = [];
+
+  for (let i = 0; i < uniqueAnchors.length; i++) {
+    const start = uniqueAnchors[i];
+    const goal = uniqueAnchors[(i + 1) % uniqueAnchors.length];
+
+    let segment = pathfinder.findPath(start, goal);
+
+    console.log('JPS segment:', start, '->', goal, '=', segment ? segment.length : 0);
+
+    if (!segment || segment.length === 0) {
+      continue;
+    }
+
+    if (i > 0) {
+      segment.shift();
+    }
+
+    this.dungeonPatrolTiles.push(...segment);
+  }
+
+  if (!this.dungeonPatrolTiles || this.dungeonPatrolTiles.length < 2) {
+    this.dungeonPatrolPath = [];
+    return;
+  }
+
+  this.dungeonPatrolPath = this.dungeonPatrolTiles.map(tile =>
+    this.dungeonMap.localize(tile).clone().add(this.dungeonOffset)
+  );
+}
+
+drawDungeon3PatrolLoop() {
+  if (!this.dungeonPatrolPath || this.dungeonPatrolPath.length < 2) return;
+
+  if (this.dungeonPatrolLine) {
+    this.scene.remove(this.dungeonPatrolLine);
+  }
+
+  const points = this.dungeonPatrolPath.map(p => new THREE.Vector3(p.x, 1.5, p.z));
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({ color: 0xffff00 });
+
+  this.dungeonPatrolLine = new THREE.LineLoop(geometry, material);
+  this.scene.add(this.dungeonPatrolLine);
+}
+
+// create dungeon guard patrol loop in dungeon 3
+createDungeonGuard() {
+  if (!this.dungeonPatrolPath || this.dungeonPatrolPath.length < 2) {
+    console.log("❌ dungeon patrol path not ready");
+    return;
+  }
+
+  const spawnIndex = Math.floor(this.dungeonPatrolPath.length / 2);
+  const startPos = this.dungeonPatrolPath[spawnIndex].clone();
+
+  this.dungeonGuard = new DynamicEntity({
+    position: new THREE.Vector3(startPos.x, 1.0, startPos.z),
+    velocity: new THREE.Vector3(0, 0, 0),
+    topSpeed: 3.0,
+    color: 0xff0000,
+    scale: new THREE.Vector3(1.2, 1.2, 1.2)
+  });
+
+  this.dungeonGuard.isDungeonGuard = true;
+  this.dungeonGuard.maxForce = 8.0;
+
+  this.dungeonGuard.pathFollower = {
+    path: this.dungeonPatrolPath,
+    segmentIndex: spawnIndex,
+    pathRadius: 0.8,
+    predictDistance: 2.5,
+    targetOffset: 2.0
+  };
+
+  const guardBody = new THREE.Mesh(
+    new THREE.BoxGeometry(1.2, 2.0, 1.2),
+    new THREE.MeshStandardMaterial({
+      color: 0xff0000,
+      emissive: 0x330000
+    })
+  );
+  guardBody.position.set(0, 1.0, 0);
+  this.dungeonGuard.mesh.add(guardBody);
+
+  const guardHead = new THREE.Mesh(
+    new THREE.SphereGeometry(0.35, 16, 16),
+    new THREE.MeshStandardMaterial({
+      color: 0xffaaaa,
+      emissive: 0x220000
+    })
+  );
+  guardHead.position.set(0, 2.2, 0);
+  this.dungeonGuard.mesh.add(guardHead);
+
+  const marker = new THREE.Mesh(
+    new THREE.ConeGeometry(0.25, 0.6, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffff00 })
+  );
+  marker.position.set(0, 2.9, 0);
+  this.dungeonGuard.mesh.add(marker);
+
+  this.addEntityToWorld(this.dungeonGuard);
+
+  console.log("✅ dungeon guard created at:", this.dungeonGuard.position);
+}
+
+updateDungeonGuard(dt) {
+  if (!this.dungeonGuard) return;
+
+  const steering = ReynoldsPathFollowing.followLoop(this.dungeonGuard);
+  this.dungeonGuard.applyForce(steering);
+
+  const dungeonAdapter = {
+    handleCollisions: (entity) => {
+      const fakeEntity = {
+        ...entity,
+        position: entity.position.clone().sub(this.dungeonOffset)
+      };
+
+      const corrected = this.dungeonMap.handleCollisions(fakeEntity);
+      return corrected.add(this.dungeonOffset);
+    }
+  };
+
+  this.dungeonGuard.update(dt, dungeonAdapter);
+  this.dungeonGuard.position.y = 1.0;
+
+  const flatVel = this.dungeonGuard.velocity.clone();
+  flatVel.y = 0;
+
+  if (flatVel.lengthSq() > 0.0001) {
+    this.dungeonGuard.mesh.rotation.y = Math.atan2(flatVel.x, flatVel.z);
+  }
+}
 // restart 
 reset() {
   while (this.scene.children.length > 0) {
@@ -1354,7 +1541,7 @@ reset() {
 
   // Update main character movement and animation
   this.updateMainCharacter(dt);
-
+  this.updateDungeonGuard(dt);
   // Update main character animation mixer if present
   if (this.mainCharacterMixer) {
     this.mainCharacterMixer.update(dt);
