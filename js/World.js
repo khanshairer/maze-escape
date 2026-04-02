@@ -120,8 +120,21 @@ init() {
   );
 
   // ----- create hallway connection between map 2 and dungeon -----
-  let row3 = this.findClosestWalkableRow(this.dungeonMap, preferredRow, 'left');
   let rowMap2ToDungeon = this.findClosestWalkableRow(this.map2, preferredRow, 'right');
+  let row3 = this.findClosestWalkableRow(this.dungeonMap, preferredRow, 'left');
+
+  this.connectionRow2 = rowMap2ToDungeon;
+
+  if (
+    this.dungeonMap.grid[this.connectionRow2] &&
+    this.dungeonMap.grid[this.connectionRow2][1] &&
+    this.dungeonMap.grid[this.connectionRow2][1].isWalkable()
+  ) {
+    row3 = this.connectionRow2;
+  } else {
+    this.connectionRow2 = row3;
+    rowMap2ToDungeon = this.findClosestWalkableRow(this.map2, this.connectionRow2, 'right');
+  }
 
   this.openMazeSide(this.map2, rowMap2ToDungeon, 'right');
   this.openMazeSide(this.dungeonMap, row3, 'left');
@@ -138,7 +151,11 @@ init() {
   this.mazeGroup1 = new THREE.Group();
   this.scene.add(this.mazeGroup1);
 
-  this.tileMapRenderer = new TileMapRenderer(this.map);
+  this.tileMapRenderer = new TileMapRenderer(this.map, {
+    useFenceObstacles: true,
+    fencePath: '/fence/scene.gltf',
+    fenceScale: new THREE.Vector3(0.4, 0.4, 0.4)
+  });
   this.tileMapRenderer.render(this.mazeGroup1);
 
   // ----- render second maze -----
@@ -146,14 +163,20 @@ init() {
   this.mazeGroup2.position.copy(this.map2Offset);
   this.scene.add(this.mazeGroup2);
 
-  this.tileMapRenderer2 = new TileMapRenderer(this.map2);
+  this.tileMapRenderer2 = new TileMapRenderer(this.map2, {
+    useFenceObstacles: true,
+    fencePath: '/fence/scene.gltf',
+    fenceScale: new THREE.Vector3(0.5, 0.5, 0.5)
+  });
   this.tileMapRenderer2.render(this.mazeGroup2);
 
   this.dungeonGroup = new THREE.Group();
   this.dungeonGroup.position.copy(this.dungeonOffset);
   this.scene.add(this.dungeonGroup);
 
-  this.dungeonRenderer = new TileMapRenderer(this.dungeonMap);
+  this.dungeonRenderer = new TileMapRenderer(this.dungeonMap, {
+    useFenceObstacles: false
+  });
   this.dungeonRenderer.render(this.dungeonGroup);
 
   // ================================
