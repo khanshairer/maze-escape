@@ -9,6 +9,8 @@ import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js';
 import { DebugVisuals } from './debug/DebugVisuals.js';
 import { DungeonGenerator } from './pcg/DungeonGenerator.js';
+import { JPS } from './ai/pathfinding/JPS.js';
+import { ReynoldsPathFollowing } from './ai/steering/ReynoldsPathFollowing.js';
 /**
  * World class holds all information about our game's world
  */
@@ -247,11 +249,14 @@ init() {
 
   this.addEntityToWorld(this.main_character);
 
-  this.createGoals(5);
+  //this.createGoals(5);
   this.createLoadingIndicator();
   this.createNPCs(10);
+  this.createPatrolLoopInDungeon3();
+  this.drawDungeon3PatrolLoop();
+  this.createDungeonGuard();
 
-  this.createGoalsForMap(this.map2, this.map2Offset, 5);
+  //this.createGoalsForMap(this.map2, this.map2Offset, 5);
   this.createNPCsForMap(this.map2, this.map2Offset, 10);
 }
 
@@ -480,66 +485,7 @@ connectSideToInterior(map, row, side = 'left') {
   return this.map;
 }
 
-  // for second maze, we need to offset the positions of goals and NPCs
-  createGoalsForMap(map, offset, numGoals = 5) {
-    let goalCount = 0;
-    let maxAttempts = 1000;
-    let attempts = 0;
-
-    while (goalCount < numGoals && attempts < maxAttempts) {
-      attempts++;
-
-      let randomTile =
-        map.walkableTiles[Math.floor(Math.random() * map.walkableTiles.length)];
-
-      let position = map.localize(randomTile).clone().add(offset);
-
-      const tempGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-      const tempMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffdd44,
-        emissive: 0x442200,
-        transparent: true,
-        opacity: 0.8
-      });
-      const tempMarker = new THREE.Mesh(tempGeometry, tempMaterial);
-      tempMarker.position.copy(position);
-      tempMarker.position.y = 1;
-      this.scene.add(tempMarker);
-
-      const loader = new GLTFLoader();
-      loader.load(
-        '/pier/scene.gltf',
-        (gltf) => {
-          const model = gltf.scene;
-          this.scene.remove(tempMarker);
-
-          const box = new THREE.Box3().setFromObject(model);
-          const center = new THREE.Vector3();
-          box.getCenter(center);
-          const size = new THREE.Vector3();
-          box.getSize(size);
-
-          const pierGroup = new THREE.Group();
-          model.position.copy(center.clone().negate());
-          pierGroup.add(model);
-
-          pierGroup.scale.set(0.3, 0.5, 0.3);
-          pierGroup.position.copy(position);
-
-          const scaledHeight = size.y * 0.5;
-          pierGroup.position.y = scaledHeight / 2;
-          pierGroup.rotation.y = Math.random() * Math.PI * 2;
-
-          this.scene.add(pierGroup);
-        },
-        undefined,
-        () => {}
-      );
-
-      goalCount++;
-    }
-  }
-
+  
   
 
   // for second maze ....create NPCs with offset
@@ -742,151 +688,7 @@ connectSideToInterior(map, row, side = 'left') {
   // create 5 random goal in the world
   // create goals in the world with pier models
   // create goals in the world with pier models
-  createGoals(numGoals = 5) {
-    var goalCount = 0;
-    var maxAttempts = 1000;
-    var attempts = 0;
-
-    // Store pier entities for loading tracking
-    this.piers = [];
-    this.piersLoading = numGoals;
-    this.piersLoaded = 0;
-
-    while (goalCount < numGoals && attempts < maxAttempts) {
-      attempts++;
-
-      let randomTile =
-        this.map.walkableTiles[
-          Math.floor(Math.random() * this.map.walkableTiles.length)
-        ];
-
-      if (
-        this.goals.some(
-          (g) => g.row === randomTile.row && g.col === randomTile.col
-        )
-      ) {
-        continue;
-      }
-
-      // Check all 8 adjacent directions for existing goals
-      let isAdjacentToGoal = this.goals.some((goal) => {
-        let rowDiff = Math.abs(goal.row - randomTile.row);
-        let colDiff = Math.abs(goal.col - randomTile.col);
-
-        return (
-          rowDiff <= 1 &&
-          colDiff <= 1 &&
-          !(rowDiff === 0 && colDiff === 0)
-        );
-      });
-
-      if (!isAdjacentToGoal) {
-        // Get position for this goal - this should already be the tile center
-        let position = this.map.localize(randomTile);
-
-        // Create a temporary visual marker (colored cube) while pier loads
-        const tempGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-        const tempMaterial = new THREE.MeshStandardMaterial({
-          color: 0xffdd44,
-          emissive: 0x442200,
-          transparent: true,
-          opacity: 0.8
-        });
-        const tempMarker = new THREE.Mesh(tempGeometry, tempMaterial);
-        tempMarker.position.copy(position);
-        tempMarker.position.y = 1; // Lift slightly above ground
-        this.scene.add(tempMarker);
-
-        // Load pier model
-        const loader = new GLTFLoader();
-        loader.load(
-          '/pier/scene.gltf',
-          (gltf) => {
-            const model = gltf.scene;
-
-            // Remove temporary marker
-            this.scene.remove(tempMarker);
-
-            // First, get the original bounds to center properly
-            const box = new THREE.Box3().setFromObject(model);
-            const center = new THREE.Vector3();
-            box.getCenter(center);
-            const size = new THREE.Vector3();
-            box.getSize(size);
-
-            // Create a container group to hold the pier
-            const pierGroup = new THREE.Group();
-
-            // Add model to group and offset so it's centered
-            model.position.copy(center.clone().negate());
-            pierGroup.add(model);
-
-            // Scale the group
-            pierGroup.scale.set(0.3, 0.5, 0.3);
-
-            // Position the group at the tile center
-            pierGroup.position.copy(position);
-
-            // Adjust Y position to sit on ground
-            const scaledHeight = size.y * 0.5;
-            pierGroup.position.y = scaledHeight / 2;
-
-            // Add random rotation for variety
-            pierGroup.rotation.y = Math.random() * Math.PI * 2;
-
-            // Add to scene
-            this.scene.add(pierGroup);
-
-            // Store reference to the group
-            this.piers.push({
-              mesh: pierGroup,
-              tile: randomTile,
-              position: position
-            });
-
-            // Add a small debug sphere at the exact tile center to verify alignment
-            const debugSphere = new THREE.Mesh(
-              new THREE.SphereGeometry(0.2, 8, 8),
-              new THREE.MeshBasicMaterial({ color: 0x00ff00 })
-            );
-            debugSphere.position.copy(position);
-            debugSphere.position.y = 0.5;
-            this.scene.add(debugSphere);
-
-            // Remove debug sphere after 5 seconds
-            setTimeout(() => this.scene.remove(debugSphere), 5000);
-
-            // Track loading progress
-            this.piersLoaded++;
-          },
-          (progress) => {
-            // Optional progress
-          },
-          (error) => {
-            // Keep temporary marker as fallback but make it solid
-            tempMarker.material.wireframe = false;
-            tempMarker.material.color.setHex(0xffaa00);
-            tempMarker.material.emissive.setHex(0x332200);
-            tempMarker.material.transparent = false;
-
-            // Still store as goal
-            this.piers.push({
-              mesh: tempMarker,
-              tile: randomTile,
-              position: position
-            });
-
-            this.piersLoaded++;
-          }
-        );
-
-        // Mark this tile as a goal
-        this.goals.push(randomTile);
-        goalCount++;
-      }
-    }
-  }
-
+  
   // create npcs with visual loading feedback
   createNPCs(numNPCs = 10) {
     this.modelsLoading = numNPCs;
@@ -1295,6 +1097,231 @@ updateGroundAttackers() {
   }
 }
 
+// helper function to create partol loop 
+createPatrolLoopInDungeon3() {
+  if (!this.dungeonMap.walkableTiles || this.dungeonMap.walkableTiles.length === 0) {
+    this.dungeonMap.walkableTiles =
+      this.dungeonMap.grid.flat().filter(t => t.isWalkable());
+  }
+
+  const nearestWalkable = (r, c) => {
+    let best = null;
+    let bestDist = Infinity;
+
+    for (let t of this.dungeonMap.walkableTiles) {
+      let d = Math.abs(t.row - r) + Math.abs(t.col - c);
+      if (d < bestDist) {
+        bestDist = d;
+        best = t;
+      }
+    }
+    return best;
+  };
+
+  const anchors = [
+    nearestWalkable(2, 2),
+    nearestWalkable(2, this.dungeonMap.cols - 3),
+    nearestWalkable(this.dungeonMap.rows - 3, this.dungeonMap.cols - 3),
+    nearestWalkable(this.dungeonMap.rows - 3, 2)
+  ].filter(Boolean);
+
+  const uniqueAnchors = [];
+  const seen = new Set();
+
+  for (let tile of anchors) {
+    const key = `${tile.row},${tile.col}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueAnchors.push(tile);
+    }
+  }
+
+  if (uniqueAnchors.length < 2) {
+    this.dungeonPatrolTiles = [];
+    this.dungeonPatrolPath = [];
+    return;
+  }
+
+  const pathfinder = new JPS(this.dungeonMap);
+
+  this.dungeonPatrolTiles = [];
+
+  for (let i = 0; i < uniqueAnchors.length; i++) {
+    const start = uniqueAnchors[i];
+    const goal = uniqueAnchors[(i + 1) % uniqueAnchors.length];
+
+    let segment = pathfinder.findPath(start, goal);
+
+    console.log('JPS segment:', start, '->', goal, '=', segment ? segment.length : 0);
+
+    if (!segment || segment.length === 0) {
+      continue;
+    }
+
+    if (i > 0) {
+      segment.shift();
+    }
+
+    this.dungeonPatrolTiles.push(...segment);
+  }
+
+  if (!this.dungeonPatrolTiles || this.dungeonPatrolTiles.length < 2) {
+    this.dungeonPatrolPath = [];
+    return;
+  }
+
+  this.dungeonPatrolPath = this.dungeonPatrolTiles.map(tile =>
+    this.dungeonMap.localize(tile).clone().add(this.dungeonOffset)
+  );
+}
+
+drawDungeon3PatrolLoop() {
+  if (!this.dungeonPatrolPath || this.dungeonPatrolPath.length < 2) return;
+
+  if (this.dungeonPatrolLine) {
+    this.scene.remove(this.dungeonPatrolLine);
+  }
+
+  const points = this.dungeonPatrolPath.map(p => new THREE.Vector3(p.x, 1.5, p.z));
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({ color: 0xffff00 });
+
+  this.dungeonPatrolLine = new THREE.LineLoop(geometry, material);
+  this.scene.add(this.dungeonPatrolLine);
+}
+
+// create dungeon guard patrol loop in dungeon 3
+createDungeonGuard() {
+  if (!this.dungeonPatrolPath || this.dungeonPatrolPath.length < 2) {
+    console.log("❌ dungeon patrol path not ready");
+    return;
+  }
+
+  const spawnIndex = Math.floor(this.dungeonPatrolPath.length / 2);
+  const startPos = this.dungeonPatrolPath[spawnIndex].clone();
+
+  this.dungeonGuard = new DynamicEntity({
+    position: new THREE.Vector3(startPos.x, 1.0, startPos.z),
+    velocity: new THREE.Vector3(0, 0, 0),
+    topSpeed: 2.2,
+    color: 0xff0000,
+    scale: new THREE.Vector3(1, 1, 1)
+  });
+
+  this.dungeonGuard.isDungeonGuard = true;
+  this.dungeonGuard.maxForce = 8.0;
+
+  this.dungeonGuard.pathFollower = {
+    path: this.dungeonPatrolPath,
+    segmentIndex: spawnIndex,
+    pathRadius: 0.8,
+    predictDistance: 2.5,
+    targetOffset: 2.0
+  };
+
+  this.dungeonGuard.modelFacingOffset = Math.PI;
+
+  const tempBody = new THREE.Mesh(
+    new THREE.BoxGeometry(1.2, 2.0, 1.2),
+    new THREE.MeshStandardMaterial({
+      color: 0xff0000,
+      emissive: 0x330000
+    })
+  );
+  tempBody.position.set(0, 1.0, 0);
+  this.dungeonGuard.mesh.add(tempBody);
+  this.dungeonGuard.tempBody = tempBody;
+
+  const loader = new GLTFLoader();
+  loader.load(
+    '/walking_angry_king_guard/scene.gltf',
+    (gltf) => {
+      const model = gltf.scene;
+
+      if (this.dungeonGuard.tempBody) {
+        this.dungeonGuard.mesh.remove(this.dungeonGuard.tempBody);
+        this.dungeonGuard.tempBody.geometry.dispose();
+        this.dungeonGuard.tempBody.material.dispose();
+        this.dungeonGuard.tempBody = null;
+      }
+
+      while (this.dungeonGuard.mesh.children.length > 0) {
+        this.dungeonGuard.mesh.remove(this.dungeonGuard.mesh.children[0]);
+      }
+
+      model.scale.set(1.4, 1.4, 1.4);
+
+      const box = new THREE.Box3().setFromObject(model);
+      model.position.y = -box.min.y;
+
+      model.rotation.y = 0;
+
+      this.dungeonGuard.mesh.add(model);
+      this.dungeonGuard.guardModel = model;
+
+      if (gltf.animations && gltf.animations.length > 0) {
+        const mixer = new THREE.AnimationMixer(model);
+        this.dungeonGuard.mixer = mixer;
+        this.mixers.push(mixer);
+
+        const clipIndex = gltf.animations[1] ? 1 : 0;
+        const action = mixer.clipAction(gltf.animations[clipIndex]);
+        action.reset();
+        action.play();
+
+        this.dungeonGuard.currentAction = action;
+
+        console.log("✅ dungeon guard animation playing:", clipIndex);
+      } else {
+        console.log("⚠️ no animations found on walking_angry_king_guard");
+      }
+    },
+    undefined,
+    (error) => {
+      console.log("❌ failed to load walking_angry_king_guard:", error);
+    }
+  );
+
+  this.addEntityToWorld(this.dungeonGuard);
+
+  console.log("✅ dungeon guard created at:", this.dungeonGuard.position);
+}
+
+updateDungeonGuard(dt) {
+  if (!this.dungeonGuard) return;
+  if (!this.dungeonGuard.pathFollower) return;
+
+  const steering = ReynoldsPathFollowing.followLoop(this.dungeonGuard);
+  this.dungeonGuard.applyForce(steering);
+
+  const dungeonAdapter = {
+    handleCollisions: (entity) => {
+      const fakeEntity = {
+        ...entity,
+        position: entity.position.clone().sub(this.dungeonOffset)
+      };
+
+      const corrected = this.dungeonMap.handleCollisions(fakeEntity);
+      return corrected.add(this.dungeonOffset);
+    }
+  };
+
+  this.dungeonGuard.update(dt, dungeonAdapter);
+  this.dungeonGuard.position.y = 1.0;
+
+  if (this.dungeonGuard.mixer) {
+    this.dungeonGuard.mixer.update(dt);
+  }
+
+  const flatVel = this.dungeonGuard.velocity.clone();
+  flatVel.y = 0;
+
+  if (flatVel.lengthSq() > 0.0001) {
+    const moveAngle = Math.atan2(flatVel.x, flatVel.z);
+    const facingOffset = this.dungeonGuard.modelFacingOffset ?? 0;
+    this.dungeonGuard.mesh.rotation.y = moveAngle + facingOffset;
+  }
+}
 // restart 
 reset() {
   while (this.scene.children.length > 0) {
@@ -1354,7 +1381,7 @@ reset() {
 
   // Update main character movement and animation
   this.updateMainCharacter(dt);
-
+  this.updateDungeonGuard(dt);
   // Update main character animation mixer if present
   if (this.mainCharacterMixer) {
     this.mainCharacterMixer.update(dt);
