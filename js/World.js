@@ -11,6 +11,7 @@ import { DebugVisuals } from './debug/DebugVisuals.js';
 import { DungeonGenerator } from './pcg/DungeonGenerator.js';
 import { JPS } from './ai/pathfinding/JPS.js';
 import { ReynoldsPathFollowing } from './ai/steering/ReynoldsPathFollowing.js';
+import { SteeringBehaviours } from './ai/steering/SteeringBehaviours.js';
 /**
  * World class holds all information about our game's world
  */
@@ -651,6 +652,7 @@ connectSideToInterior(map, row, side = 'left') {
   // create 10 ground attackers in the first maze (for vector pathfinding testing)
   createGroundAttackers(numAttackers = 10) {
   this.ground_attackers = [];
+  this.modelsLoading += numAttackers;
 
   for (let i = 0; i < numAttackers; i++) {
     let attackerTile;
@@ -677,8 +679,50 @@ connectSideToInterior(map, row, side = 'left') {
       scale: new THREE.Vector3(1, 0.75, 1)
     });
 
-    attacker.boatLoaded = true;
+    attacker.boatLoaded = false;
     attacker.position.y = 1;
+    attacker.modelFacingOffset = 0;
+
+    const loader = new GLTFLoader();
+    loader.load(
+      '/sphere_robot/scene.gltf',
+      (gltf) => {
+        const model = gltf.scene;
+
+        while (attacker.mesh.children.length > 0) {
+          attacker.mesh.remove(attacker.mesh.children[0]);
+        }
+
+        model.scale.set(2.2, 2.2, 2.2);
+
+        const box = new THREE.Box3().setFromObject(model);
+        model.position.y = -box.min.y;
+        model.rotation.y = 0;
+
+        attacker.mesh.add(model);
+        attacker.robotModel = model;
+        attacker.boatLoaded = true;
+
+        if (gltf.animations && gltf.animations.length > 0) {
+          const mixer = new THREE.AnimationMixer(model);
+          const action = mixer.clipAction(gltf.animations[0]);
+          action.play();
+          attacker.mixer = mixer;
+          this.mixers.push(mixer);
+        }
+
+        this.modelsLoaded++;
+        this.updateLoadingIndicator();
+      },
+      undefined,
+      (error) => {
+        console.log('❌ failed to load sphere_robot:', error);
+        attacker.boatLoaded = true;
+        attacker.loadError = true;
+        this.modelsLoaded++;
+        this.updateLoadingIndicator();
+      }
+    );
 
     this.ground_attackers.push(attacker);
     this.addEntityToWorld(attacker);
@@ -1203,7 +1247,7 @@ createDungeonGuard() {
   this.dungeonGuard = new DynamicEntity({
     position: new THREE.Vector3(startPos.x, 1.0, startPos.z),
     velocity: new THREE.Vector3(0, 0, 0),
-    topSpeed: 2.2,
+    topSpeed: 4.4,
     color: 0xff0000,
     scale: new THREE.Vector3(1, 1, 1)
   });
@@ -1214,12 +1258,17 @@ createDungeonGuard() {
   this.dungeonGuard.pathFollower = {
     path: this.dungeonPatrolPath,
     segmentIndex: spawnIndex,
-    pathRadius: 0.8,
-    predictDistance: 2.5,
-    targetOffset: 2.0
+    pathRadius: 0.25,
+    predictDistance: 0.15,
+    targetOffset: 0.08
   };
 
-  this.dungeonGuard.modelFacingOffset = Math.PI;
+  this.dungeonGuard.modelFacingOffset = 0;
+
+  this.dungeonGuard.detectRadius = 12;
+  this.dungeonGuard.catchRadius = 1.5;
+  this.dungeonGuard.isChasing = false;
+  this.dungeonGuard.lookAhead = 0.6;
 
   const tempBody = new THREE.Mesh(
     new THREE.BoxGeometry(1.2, 2.0, 1.2),
@@ -1234,7 +1283,7 @@ createDungeonGuard() {
 
   const loader = new GLTFLoader();
   loader.load(
-    '/walking_angry_king_guard/scene.gltf',
+    '/walking_mario/scene.gltf',
     (gltf) => {
       const model = gltf.scene;
 
@@ -1249,11 +1298,10 @@ createDungeonGuard() {
         this.dungeonGuard.mesh.remove(this.dungeonGuard.mesh.children[0]);
       }
 
-      model.scale.set(1.4, 1.4, 1.4);
+      model.scale.set(0.015, 0.015, 0.015);
 
       const box = new THREE.Box3().setFromObject(model);
       model.position.y = -box.min.y;
-
       model.rotation.y = 0;
 
       this.dungeonGuard.mesh.add(model);
@@ -1267,18 +1315,19 @@ createDungeonGuard() {
         const clipIndex = gltf.animations[1] ? 1 : 0;
         const action = mixer.clipAction(gltf.animations[clipIndex]);
         action.reset();
+        action.setEffectiveTimeScale(0.35);
         action.play();
 
         this.dungeonGuard.currentAction = action;
 
         console.log("✅ dungeon guard animation playing:", clipIndex);
       } else {
-        console.log("⚠️ no animations found on walking_angry_king_guard");
+        console.log("⚠️ no animations found on walking_mario");
       }
     },
     undefined,
     (error) => {
-      console.log("❌ failed to load walking_angry_king_guard:", error);
+      console.log("❌ failed to load walking_mario:", error);
     }
   );
 
@@ -1290,8 +1339,32 @@ createDungeonGuard() {
 updateDungeonGuard(dt) {
   if (!this.dungeonGuard) return;
   if (!this.dungeonGuard.pathFollower) return;
+  if (!this.main_character) return;
 
-  const steering = ReynoldsPathFollowing.followLoop(this.dungeonGuard);
+  const pf = this.dungeonGuard.pathFollower;
+  const path = pf.path;
+
+  if (!path || path.length < 2) return;
+
+  const toPlayer = this.main_character.position.clone().sub(this.dungeonGuard.position);
+  toPlayer.y = 0;
+  const playerDistance = toPlayer.length();
+
+  this.dungeonGuard.isChasing = playerDistance <= this.dungeonGuard.detectRadius;
+
+  let steering;
+
+  if (this.dungeonGuard.isChasing) {
+    steering = SteeringBehaviours.pursue(
+      this.dungeonGuard,
+      this.main_character,
+      this.dungeonGuard.lookAhead
+    );
+  } else {
+    steering = ReynoldsPathFollowing.followLoop(this.dungeonGuard);
+  }
+
+  steering.clampLength(0, this.dungeonGuard.maxForce);
   this.dungeonGuard.applyForce(steering);
 
   const dungeonAdapter = {
@@ -1309,15 +1382,51 @@ updateDungeonGuard(dt) {
   this.dungeonGuard.update(dt, dungeonAdapter);
   this.dungeonGuard.position.y = 1.0;
 
-  if (this.dungeonGuard.mixer) {
-    this.dungeonGuard.mixer.update(dt);
+  this.dungeonGuard.velocity.y = 0;
+  this.dungeonGuard.velocity.clampLength(0, this.dungeonGuard.topSpeed);
+
+  let facingDir = new THREE.Vector3();
+
+  if (this.dungeonGuard.isChasing) {
+    facingDir = this.main_character.position.clone().sub(this.dungeonGuard.position);
+    facingDir.y = 0;
+  } else {
+    const a = path[pf.segmentIndex % path.length];
+    const b = path[(pf.segmentIndex + 1) % path.length];
+
+    const ab = b.clone().sub(a);
+    const abLenSq = ab.lengthSq();
+
+    if (abLenSq > 0) {
+      const ap = this.dungeonGuard.position.clone().sub(a);
+      let t = ap.dot(ab) / abLenSq;
+      t = THREE.MathUtils.clamp(t, 0, 1);
+
+      const closestPoint = a.clone().add(ab.clone().multiplyScalar(t));
+      const offsetFromPath = this.dungeonGuard.position.clone().sub(closestPoint);
+      offsetFromPath.y = 0;
+
+      const maxDrift = pf.pathRadius ?? 0.25;
+
+      if (offsetFromPath.length() > maxDrift) {
+        const correctedPos = closestPoint.clone();
+        correctedPos.y = 1.0;
+        this.dungeonGuard.position.lerp(correctedPos, 0.2);
+
+        this.dungeonGuard.velocity.multiplyScalar(0.5);
+        this.dungeonGuard.velocity.y = 0;
+        this.dungeonGuard.velocity.clampLength(0, this.dungeonGuard.topSpeed);
+      }
+    }
+
+    facingDir = b.clone().sub(a);
+    facingDir.y = 0;
   }
 
-  const flatVel = this.dungeonGuard.velocity.clone();
-  flatVel.y = 0;
+  if (facingDir.lengthSq() > 0.0001) {
+    facingDir.normalize();
 
-  if (flatVel.lengthSq() > 0.0001) {
-    const moveAngle = Math.atan2(flatVel.x, flatVel.z);
+    const moveAngle = Math.atan2(facingDir.x, facingDir.z);
     const facingOffset = this.dungeonGuard.modelFacingOffset ?? 0;
     this.dungeonGuard.mesh.rotation.y = moveAngle + facingOffset;
   }
@@ -1397,6 +1506,8 @@ reset() {
 
   // Update all entities (this includes the main character)
   for (let e of this.entities) {
+    if (e === this.dungeonGuard) continue;
+
     if (e.update) {
       e.update(dt, this.getMapAdapterForPosition(e.position));
     }
