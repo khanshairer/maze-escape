@@ -249,14 +249,14 @@ init() {
 
   this.addEntityToWorld(this.main_character);
 
-  this.createGoals(5);
+  //this.createGoals(5);
   this.createLoadingIndicator();
   this.createNPCs(10);
   this.createPatrolLoopInDungeon3();
   this.drawDungeon3PatrolLoop();
   this.createDungeonGuard();
 
-  this.createGoalsForMap(this.map2, this.map2Offset, 5);
+  //this.createGoalsForMap(this.map2, this.map2Offset, 5);
   this.createNPCsForMap(this.map2, this.map2Offset, 10);
 }
 
@@ -485,66 +485,7 @@ connectSideToInterior(map, row, side = 'left') {
   return this.map;
 }
 
-  // for second maze, we need to offset the positions of goals and NPCs
-  createGoalsForMap(map, offset, numGoals = 5) {
-    let goalCount = 0;
-    let maxAttempts = 1000;
-    let attempts = 0;
-
-    while (goalCount < numGoals && attempts < maxAttempts) {
-      attempts++;
-
-      let randomTile =
-        map.walkableTiles[Math.floor(Math.random() * map.walkableTiles.length)];
-
-      let position = map.localize(randomTile).clone().add(offset);
-
-      const tempGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-      const tempMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffdd44,
-        emissive: 0x442200,
-        transparent: true,
-        opacity: 0.8
-      });
-      const tempMarker = new THREE.Mesh(tempGeometry, tempMaterial);
-      tempMarker.position.copy(position);
-      tempMarker.position.y = 1;
-      this.scene.add(tempMarker);
-
-      const loader = new GLTFLoader();
-      loader.load(
-        '/pier/scene.gltf',
-        (gltf) => {
-          const model = gltf.scene;
-          this.scene.remove(tempMarker);
-
-          const box = new THREE.Box3().setFromObject(model);
-          const center = new THREE.Vector3();
-          box.getCenter(center);
-          const size = new THREE.Vector3();
-          box.getSize(size);
-
-          const pierGroup = new THREE.Group();
-          model.position.copy(center.clone().negate());
-          pierGroup.add(model);
-
-          pierGroup.scale.set(0.3, 0.5, 0.3);
-          pierGroup.position.copy(position);
-
-          const scaledHeight = size.y * 0.5;
-          pierGroup.position.y = scaledHeight / 2;
-          pierGroup.rotation.y = Math.random() * Math.PI * 2;
-
-          this.scene.add(pierGroup);
-        },
-        undefined,
-        () => {}
-      );
-
-      goalCount++;
-    }
-  }
-
+  
   
 
   // for second maze ....create NPCs with offset
@@ -747,151 +688,7 @@ connectSideToInterior(map, row, side = 'left') {
   // create 5 random goal in the world
   // create goals in the world with pier models
   // create goals in the world with pier models
-  createGoals(numGoals = 5) {
-    var goalCount = 0;
-    var maxAttempts = 1000;
-    var attempts = 0;
-
-    // Store pier entities for loading tracking
-    this.piers = [];
-    this.piersLoading = numGoals;
-    this.piersLoaded = 0;
-
-    while (goalCount < numGoals && attempts < maxAttempts) {
-      attempts++;
-
-      let randomTile =
-        this.map.walkableTiles[
-          Math.floor(Math.random() * this.map.walkableTiles.length)
-        ];
-
-      if (
-        this.goals.some(
-          (g) => g.row === randomTile.row && g.col === randomTile.col
-        )
-      ) {
-        continue;
-      }
-
-      // Check all 8 adjacent directions for existing goals
-      let isAdjacentToGoal = this.goals.some((goal) => {
-        let rowDiff = Math.abs(goal.row - randomTile.row);
-        let colDiff = Math.abs(goal.col - randomTile.col);
-
-        return (
-          rowDiff <= 1 &&
-          colDiff <= 1 &&
-          !(rowDiff === 0 && colDiff === 0)
-        );
-      });
-
-      if (!isAdjacentToGoal) {
-        // Get position for this goal - this should already be the tile center
-        let position = this.map.localize(randomTile);
-
-        // Create a temporary visual marker (colored cube) while pier loads
-        const tempGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-        const tempMaterial = new THREE.MeshStandardMaterial({
-          color: 0xffdd44,
-          emissive: 0x442200,
-          transparent: true,
-          opacity: 0.8
-        });
-        const tempMarker = new THREE.Mesh(tempGeometry, tempMaterial);
-        tempMarker.position.copy(position);
-        tempMarker.position.y = 1; // Lift slightly above ground
-        this.scene.add(tempMarker);
-
-        // Load pier model
-        const loader = new GLTFLoader();
-        loader.load(
-          '/pier/scene.gltf',
-          (gltf) => {
-            const model = gltf.scene;
-
-            // Remove temporary marker
-            this.scene.remove(tempMarker);
-
-            // First, get the original bounds to center properly
-            const box = new THREE.Box3().setFromObject(model);
-            const center = new THREE.Vector3();
-            box.getCenter(center);
-            const size = new THREE.Vector3();
-            box.getSize(size);
-
-            // Create a container group to hold the pier
-            const pierGroup = new THREE.Group();
-
-            // Add model to group and offset so it's centered
-            model.position.copy(center.clone().negate());
-            pierGroup.add(model);
-
-            // Scale the group
-            pierGroup.scale.set(0.3, 0.5, 0.3);
-
-            // Position the group at the tile center
-            pierGroup.position.copy(position);
-
-            // Adjust Y position to sit on ground
-            const scaledHeight = size.y * 0.5;
-            pierGroup.position.y = scaledHeight / 2;
-
-            // Add random rotation for variety
-            pierGroup.rotation.y = Math.random() * Math.PI * 2;
-
-            // Add to scene
-            this.scene.add(pierGroup);
-
-            // Store reference to the group
-            this.piers.push({
-              mesh: pierGroup,
-              tile: randomTile,
-              position: position
-            });
-
-            // Add a small debug sphere at the exact tile center to verify alignment
-            const debugSphere = new THREE.Mesh(
-              new THREE.SphereGeometry(0.2, 8, 8),
-              new THREE.MeshBasicMaterial({ color: 0x00ff00 })
-            );
-            debugSphere.position.copy(position);
-            debugSphere.position.y = 0.5;
-            this.scene.add(debugSphere);
-
-            // Remove debug sphere after 5 seconds
-            setTimeout(() => this.scene.remove(debugSphere), 5000);
-
-            // Track loading progress
-            this.piersLoaded++;
-          },
-          (progress) => {
-            // Optional progress
-          },
-          (error) => {
-            // Keep temporary marker as fallback but make it solid
-            tempMarker.material.wireframe = false;
-            tempMarker.material.color.setHex(0xffaa00);
-            tempMarker.material.emissive.setHex(0x332200);
-            tempMarker.material.transparent = false;
-
-            // Still store as goal
-            this.piers.push({
-              mesh: tempMarker,
-              tile: randomTile,
-              position: position
-            });
-
-            this.piersLoaded++;
-          }
-        );
-
-        // Mark this tile as a goal
-        this.goals.push(randomTile);
-        goalCount++;
-      }
-    }
-  }
-
+  
   // create npcs with visual loading feedback
   createNPCs(numNPCs = 10) {
     this.modelsLoading = numNPCs;
