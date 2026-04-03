@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+__MACOSX/
+._*
+
+# Node / JS
+node_modules/
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# VS Code
+.vscode/
+
+# Environment
+.env
+
+# OS temp files
+*.swp
+*.tmp
