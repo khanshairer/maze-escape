@@ -5,7 +5,7 @@ export class RestState extends State {
   enter(entity, data) {
     entity.setColor('white');
     entity.setDetectionCircleColor(0x66e0ff, 0.35);
-    entity.restTimer = 2;
+    entity.restTimer = 0.5;
     console.log("Entering Rest State");
   }
 

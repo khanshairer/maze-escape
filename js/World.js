@@ -167,6 +167,12 @@ init() {
   clusterSize: this.droneClusterSize
 });
 
+ // ================================
+// ADD EXTRA GREEN (SAFE) TILES IN MAP 2
+// ================================
+
+this.addExtraGreenTiles(this.map2, 8); // 3–4 tiles
+
   // ----- render first maze -----
   this.mazeGroup1 = new THREE.Group();
   this.scene.add(this.mazeGroup1);
@@ -302,18 +308,18 @@ init() {
 
   //this.createGoals(5);
   this.createLoadingIndicator();
-  this.createGameplayDrones(4);
+  this.createGameplayDrones(3);
   //this.createNPCs(10);
   this.createPatrolLoopInDungeon3();
   this.drawDungeon3PatrolLoop();
   this.createDungeonGuard();
 
   //create energy cells for unlocking controller exit
-  this.createEnergyCells(5);
+  this.createEnergyCells(3);
 
 //this.createGoalsForMap(this.map2, this.map2Offset, 5);
 //this.createNPCsForMap(this.map2, this.map2Offset, 10);
-this.createEnergyCellsForMap(this.map2, this.map2Offset, 5);
+this.createEnergyCellsForMap(this.map2, this.map2Offset, 3);
 this.createEnergyCellsForMap(this.dungeonMap, this.dungeonOffset, 3);
 this.updateEnergyUnlockRequirement();
 }
@@ -851,7 +857,7 @@ connectSideToInterior(map, row, side = 'left') {
   }
 }
 
-  createGameplayDrones(numDrones = 4) {
+  createGameplayDrones(numDrones = 3) {
   this.drones = [];
   this.modelsLoading += numDrones;
 
@@ -1938,6 +1944,31 @@ isPlayerOnSafeTile() {
   if (!tile) return false;
 
   return tile.type === Tile.Type.MediumTerrain;
+}
+
+
+// for safe exit 
+addExtraGreenTiles(map, count = 8) {
+  // get ALL valid tiles first
+  let candidates = map.walkableTiles.filter(
+    tile => tile.type !== Tile.Type.MediumTerrain
+  );
+
+  // shuffle randomly
+  for (let i = candidates.length - 1; i > 0; i--) {
+    let j = Math.floor(Math.random() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+
+  // take first N tiles
+  let selected = candidates.slice(0, count);
+
+  // convert to green
+  for (let tile of selected) {
+    tile.type = Tile.Type.EasyTerrain;
+  }
+
+  console.log("✅ Added green tiles:", selected.length);
 }
 // restart 
 reset() {
