@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { SteeringBehaviours } from './ai/SteeringBehaviours';
 
 // Namespace for group steering behaviours
 export class GroupSteeringBehaviours {
@@ -24,8 +23,16 @@ export class GroupSteeringBehaviours {
       // where we need to separate
       // add the offset to our steering vector
       if (distance < radius) {
+        if (distance < 0.0001) {
+          offset.set(
+            Math.random() * 2 - 1,
+            0,
+            Math.random() * 2 - 1
+          );
+          distance = 0.0001;
+        }
 
-        offset.setLength(1/distance);
+        offset.setLength(1 / distance);
         steer.add(offset);
         count++;
 

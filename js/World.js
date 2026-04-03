@@ -5,8 +5,11 @@ import { TileMap } from './maps/TileMap.js';
 import { Tile } from './maps/Tile.js';
 import { TileMapRenderer } from './renderers/TileMapRenderer.js';
 import { DynamicEntity } from './entities/DynamicEntity.js';
+import { DroneEnemy } from './entities/DroneEnemy.js';
+import { EnergyCell } from './entities/EnergyCell.js';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js';
+import { HierarchicalAStar } from './ai/pathfinding/HierarchicalAStar.js';
 import { DebugVisuals } from './debug/DebugVisuals.js';
 import { DungeonGenerator } from './pcg/DungeonGenerator.js';
 import { JPS } from './ai/pathfinding/JPS.js';
@@ -34,6 +37,20 @@ export class World {
     this.npcs = [];
     this.mixers = [];
     this.ground_attackers = [];
+    this.energyCells = [];
+    this.drones = [];
+    this.collectedEnergyCells = 0;
+    this.totalEnergyCells = 0;
+    this.unlockRequirementFraction = 0.5;
+    this.energyCellsRequiredForUnlock = 0;
+    this.energyCellCollectionRadius = 1.5;
+    this.controllerExit = null;
+    this.controllerExitTile = null;
+    this.controllerExitUnlocked = false;
+    this.controllerExitReached = false;
+    this.controllerExitActivationRadius = 1.8;
+    this.groundAttackerRespawnDelay = 4;
+    this.droneClusterSize = 5;
 
     // Main character animation mixer and actions
     this.mainCharacterMixer = null;
@@ -146,6 +163,9 @@ init() {
   this.map.walkableTiles = this.map.grid.flat().filter(tile => tile.isWalkable());
   this.map2.walkableTiles = this.map2.grid.flat().filter(tile => tile.isWalkable());
   this.dungeonMap.walkableTiles = this.dungeonMap.grid.flat().filter(tile => tile.isWalkable());
+  this.droneHierarchicalPathfinder = new HierarchicalAStar(this.map, {
+    clusterSize: this.droneClusterSize
+  });
 
   // ----- render first maze -----
   this.mazeGroup1 = new THREE.Group();
@@ -186,6 +206,13 @@ init() {
 
   // ----- render hallway between map 2 and dungeon -----
   this.createHallwayBetweenMap2AndDungeon(rowMap2ToDungeon, row3);
+
+  this.dungeonEntryTile = this.dungeonMap.grid[row3][0];
+  this.controllerExitTile = this.findFarthestWalkableTile(
+    this.dungeonMap,
+    this.dungeonEntryTile
+  );
+  this.createControllerExit();
 
   // -------- DOOR GOAL --------
   this.doorGoal = this.map.grid[row1][this.map.cols - 1];
@@ -275,14 +302,164 @@ init() {
 
   //this.createGoals(5);
   this.createLoadingIndicator();
+  this.createGameplayDrones(4);
   this.createNPCs(10);
   this.createPatrolLoopInDungeon3();
   this.drawDungeon3PatrolLoop();
   this.createDungeonGuard();
+  this.createEnergyCells(5);
 
   //this.createGoalsForMap(this.map2, this.map2Offset, 5);
   this.createNPCsForMap(this.map2, this.map2Offset, 10);
+  this.createEnergyCellsForMap(this.map2, this.map2Offset, 5);
+  this.updateEnergyUnlockRequirement();
 }
+
+  findFarthestWalkableTile(map, fromTile) {
+    if (!fromTile || !fromTile.isWalkable()) {
+      return map.getRandomWalkableTile();
+    }
+
+    let farthestTile = fromTile;
+    let farthestDistance = -Infinity;
+
+    for (let tile of map.walkableTiles) {
+      const distance =
+        Math.abs(tile.row - fromTile.row) +
+        Math.abs(tile.col - fromTile.col);
+
+      if (distance > farthestDistance) {
+        farthestDistance = distance;
+        farthestTile = tile;
+      }
+    }
+
+    return farthestTile;
+  }
+
+  createControllerExit() {
+    if (!this.controllerExitTile) {
+      return;
+    }
+
+    const exitPosition = this.dungeonMap
+      .localize(this.controllerExitTile)
+      .clone()
+      .add(this.dungeonOffset);
+
+    const group = new THREE.Group();
+    group.position.copy(exitPosition);
+
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.1, 1.3, 0.4, 24),
+      new THREE.MeshStandardMaterial({
+        color: 0x30363d,
+        emissive: 0x111111
+      })
+    );
+    base.position.y = 0.2;
+    group.add(base);
+
+    const coreMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff5533,
+      emissive: 0x661100,
+      emissiveIntensity: 1.2
+    });
+
+    const core = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.55, 0.55, 1.8, 18),
+      coreMaterial
+    );
+    core.position.y = 1.2;
+    group.add(core);
+
+    const beacon = new THREE.Mesh(
+      new THREE.TorusGeometry(0.95, 0.08, 12, 24),
+      new THREE.MeshStandardMaterial({
+        color: 0xffaa44,
+        emissive: 0x553300,
+        emissiveIntensity: 0.9
+      })
+    );
+    beacon.rotation.x = Math.PI / 2;
+    beacon.position.y = 1.2;
+    group.add(beacon);
+
+    group.userData = {
+      base,
+      core,
+      beacon,
+      lockedColor: 0xff5533,
+      lockedEmissive: 0x661100,
+      unlockedColor: 0x33ff99,
+      unlockedEmissive: 0x116644
+    };
+
+    this.controllerExit = {
+      mesh: group,
+      position: exitPosition,
+      tile: this.controllerExitTile
+    };
+
+    this.scene.add(group);
+    this.updateControllerExitVisualState(0);
+  }
+
+  updateControllerExitVisualState(dt = 0) {
+    if (!this.controllerExit) {
+      return;
+    }
+
+    const { core, beacon, lockedColor, lockedEmissive, unlockedColor, unlockedEmissive } =
+      this.controllerExit.mesh.userData;
+
+    if (this.controllerExitUnlocked) {
+      core.material.color.setHex(unlockedColor);
+      core.material.emissive.setHex(unlockedEmissive);
+      beacon.material.color.setHex(0xaaffdd);
+      beacon.material.emissive.setHex(0x227755);
+      beacon.rotation.z += dt * 1.5;
+    } else {
+      core.material.color.setHex(lockedColor);
+      core.material.emissive.setHex(lockedEmissive);
+      beacon.material.color.setHex(0xffaa44);
+      beacon.material.emissive.setHex(0x553300);
+      beacon.rotation.z += dt * 0.35;
+    }
+  }
+
+  updateControllerExitState(dt) {
+    if (!this.controllerExit) {
+      return;
+    }
+
+    this.controllerExitUnlocked =
+      this.energyCellsRequiredForUnlock > 0 &&
+      this.collectedEnergyCells >= this.energyCellsRequiredForUnlock;
+
+    this.updateControllerExitVisualState(dt);
+  }
+
+  updateEnergyUnlockRequirement() {
+    this.energyCellsRequiredForUnlock = Math.ceil(
+      this.totalEnergyCells * this.unlockRequirementFraction
+    );
+  }
+
+  isPlayerAtUnlockedControllerExit() {
+    if (
+      !this.main_character ||
+      !this.controllerExit ||
+      !this.controllerExitUnlocked
+    ) {
+      return false;
+    }
+
+    return (
+      this.main_character.position.distanceTo(this.controllerExit.position) <=
+      this.controllerExitActivationRadius
+    );
+  }
 
   findClosestWalkableRow(map, preferredRow, side = 'right') {
     const col = side === 'right' ? map.cols - 2 : 1;
@@ -671,6 +848,78 @@ connectSideToInterior(map, row, side = 'left') {
   }
 }
 
+  createGameplayDrones(numDrones = 4) {
+    this.drones = [];
+    this.modelsLoading += numDrones;
+
+    for (let i = 0; i < numDrones; i++) {
+      const droneTile = this.getValidDroneSpawnTile(this.map, this.drones);
+      const dronePosition = this.map.localize(droneTile);
+
+      const drone = new DroneEnemy({
+        spawnTile: droneTile,
+        homeTile: droneTile,
+        patrolMap: this.map,
+        position: dronePosition.clone(),
+        velocity: new THREE.Vector3(0, 0, 0),
+        color: 0xffaa33,
+        scale: new THREE.Vector3(1, 1, 1),
+        topSpeed: 3.5
+      });
+
+      drone.position.y = 1;
+      drone.mesh.rotation.y = Math.random() * Math.PI * 2;
+      drone.initializeFSM({
+        player: this.main_character,
+        world: this
+      });
+      drone.setPathfinder(this.droneHierarchicalPathfinder);
+
+      this.loadDroneVisual(drone);
+      this.drones.push(drone);
+      this.addEntityToWorld(drone);
+    }
+  }
+
+  getValidDroneSpawnTile(map, existingDrones = []) {
+    let spawnTile;
+    let spawnPosition;
+    let tries = 0;
+
+    do {
+      spawnTile = map.getRandomWalkableTile();
+      spawnPosition = map.localize(spawnTile);
+      tries++;
+    } while (
+      tries < 300 &&
+      (
+        spawnPosition.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
+        spawnPosition.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
+        existingDrones.some((drone) => drone.position.distanceTo(spawnPosition) < 5)
+      )
+    );
+
+    return spawnTile;
+  }
+
+  loadDroneVisual(drone) {
+    const loader = new GLTFLoader();
+    loader.load(
+      '/animated_drone/scene.gltf',
+      (gltf) => {
+        drone.applyDroneModel(gltf, this.mixers);
+        this.modelsLoaded++;
+        this.updateLoadingIndicator();
+      },
+      undefined,
+      () => {
+        drone.handleLoadError();
+        this.modelsLoaded++;
+        this.updateLoadingIndicator();
+      }
+    );
+  }
+
 
   // create 10 ground attackers in the first maze (for vector pathfinding testing)
   createGroundAttackers(numAttackers = 10) {
@@ -752,14 +1001,9 @@ connectSideToInterior(map, row, side = 'left') {
   }
 }
 
-  // create 5 random goal in the world
-  // create goals in the world with pier models
-  // create goals in the world with pier models
-  
   // create npcs with visual loading feedback
   createNPCs(numNPCs = 10) {
-    this.modelsLoading = numNPCs;
-    this.modelsLoaded = 0;
+    this.modelsLoading += numNPCs;
 
     for (let i = 0; i < numNPCs; i++) {
       let randomTile =
@@ -883,6 +1127,92 @@ connectSideToInterior(map, row, side = 'left') {
     }
   }
 
+  createEnergyCells(numCells = 5) {
+    this.spawnEnergyCells(this.map, new THREE.Vector3(0, 0, 0), numCells);
+  }
+
+  createEnergyCellsForMap(map, offset, numCells = 5) {
+    this.spawnEnergyCells(map, offset, numCells);
+  }
+
+  spawnEnergyCells(map, offset, numCells = 5) {
+    let createdCount = 0;
+    let attempts = 0;
+    const maxAttempts = 1000;
+
+    while (createdCount < numCells && attempts < maxAttempts) {
+      attempts++;
+
+      const randomTile =
+        map.walkableTiles[Math.floor(Math.random() * map.walkableTiles.length)];
+
+      if (!this.isValidEnergyCellTile(map, randomTile, offset)) {
+        continue;
+      }
+
+      const cell = new EnergyCell({
+        tile: randomTile,
+        map,
+        offset,
+        position: map.localize(randomTile).clone().add(offset)
+      });
+
+      this.energyCells.push(cell);
+      this.totalEnergyCells++;
+      this.scene.add(cell.mesh);
+      createdCount++;
+    }
+  }
+
+  isValidEnergyCellTile(map, tile, offset) {
+    if (!tile || !tile.isWalkable()) {
+      return false;
+    }
+
+    const occupied = this.energyCells.some(
+      (cell) =>
+        cell.map === map &&
+        cell.tile.row === tile.row &&
+        cell.tile.col === tile.col
+    );
+
+    if (occupied) {
+      return false;
+    }
+
+    if (!this.main_character || map !== this.map) {
+      return true;
+    }
+
+    const playerTile = map.quantize(
+      this.main_character.position.clone().sub(offset)
+    );
+
+    return !(playerTile.row === tile.row && playerTile.col === tile.col);
+  }
+
+  updateEnergyCells(dt) {
+    if (!this.main_character || this.energyCells.length === 0) {
+      return;
+    }
+
+    for (let cell of this.energyCells) {
+      if (cell.collected) {
+        continue;
+      }
+
+      cell.update(dt);
+
+      if (
+        this.main_character.position.distanceTo(cell.position) <=
+        this.energyCellCollectionRadius
+      ) {
+        cell.collect();
+        this.collectedEnergyCells++;
+      }
+    }
+  }
+
   // Add an entity to the world
   addEntityToWorld(entity) {
     this.scene.add(entity.mesh);
@@ -916,6 +1246,28 @@ connectSideToInterior(map, row, side = 'left') {
   npc.velocity.set(0, 0, 0);
   if (npc.acceleration) npc.acceleration.set(0, 0, 0);
 }
+
+  respawnDrone(npc) {
+    const spawnTile = this.getValidDroneSpawnTile(
+      this.map,
+      this.drones.filter((drone) => drone !== npc)
+    );
+    const spawnPos = this.map.localize(spawnTile);
+
+    npc.spawnTile = spawnTile;
+    npc.homeTile = spawnTile;
+    npc.resetToSpawn(spawnPos);
+  }
+
+  startDroneRespawnCooldown(npc) {
+    npc.respawnTimer = this.groundAttackerRespawnDelay;
+    npc.velocity.set(0, 0, 0);
+    if (npc.acceleration) {
+      npc.acceleration.set(0, 0, 0);
+    }
+    npc.mesh.visible = false;
+    npc.position.y = -100;
+  }
 
   // Update main character movement using steering behaviours
   updateMainCharacter(dt) {
@@ -1161,6 +1513,43 @@ updateGroundAttackers() {
     npc.position.z = THREE.MathUtils.clamp(npc.position.z, minZ, maxZ);
     this.snapEntityToWalkableTile(npc);
     npc.position.y = 1;
+  }
+}
+
+// Update FSM-driven drone gameplay behaviour.
+updateDrones(dt) {
+  if (!this.drones || this.drones.length === 0) return;
+
+  for (let drone of this.drones) {
+    if (drone.respawnTimer > 0) {
+      drone.respawnTimer -= dt;
+
+      if (drone.respawnTimer <= 0) {
+        this.respawnDrone(drone);
+      }
+
+      continue;
+    }
+
+    drone.position.y = 1;
+    if (drone.velocity) drone.velocity.y = 0;
+    if (drone.acceleration) drone.acceleration.y = 0;
+    drone.updateFSM(dt, {
+      player: this.main_character,
+      world: this
+    });
+  }
+
+  const minX = this.map.minX + 1;
+  const maxX = this.map.minX + this.map.cols * this.map.tileSize - 1;
+  const minZ = this.map.minZ + 1;
+  const maxZ = this.map.minZ + this.map.rows * this.map.tileSize - 1;
+
+  for (let drone of this.drones) {
+    drone.position.x = THREE.MathUtils.clamp(drone.position.x, minX, maxX);
+    drone.position.z = THREE.MathUtils.clamp(drone.position.z, minZ, maxZ);
+    this.snapEntityToWalkableTile(drone);
+    drone.position.y = 1;
   }
 }
 
@@ -1464,10 +1853,20 @@ reset() {
   this.ground_attackers = [];
   this.goals = [];
   this.npcs = [];
+  this.drones = [];
+  this.energyCells = [];
   this.mixers = [];
+  this.collectedEnergyCells = 0;
+  this.totalEnergyCells = 0;
+  this.energyCellsRequiredForUnlock = 0;
+  this.controllerExit = null;
+  this.controllerExitTile = null;
+  this.controllerExitUnlocked = false;
+  this.controllerExitReached = false;
 
   this.main_character = null;
   this.groundVectorPathFinding = null;
+  this.droneHierarchicalPathfinder = null;
   this.mazeGroup1 = null;
   this.mazeGroup2 = null;
   this.hallwayMesh = null;
@@ -1475,6 +1874,10 @@ reset() {
 
   this.dungeonGroup = null;
   this.dungeonRenderer = null;
+  this.dungeonGuard = null;
+  this.dungeonPatrolTiles = [];
+  this.dungeonPatrolPath = [];
+  this.dungeonPatrolLine = null;
   this.dungeonMap = null;
   this.hallwayMesh2 = null;
   this.hallwayBounds2 = null;
@@ -1526,6 +1929,7 @@ reset() {
 
   //updateGroundAttacker with new steering behaviours
   this.updateGroundAttackers();
+  this.updateDrones(dt);
 
   // Update all entities (this includes the main character)
   for (let e of this.entities) {
@@ -1535,6 +1939,9 @@ reset() {
       e.update(dt, this.getMapAdapterForPosition(e.position));
     }
   }
+
+  this.updateEnergyCells(dt);
+  this.updateControllerExitState(dt);
 
   // keep player stable inside dungeon bounds
   if (this.main_character) {
