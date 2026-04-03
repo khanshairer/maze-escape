@@ -1,5 +1,5 @@
 import { State } from './State.js';
-import { SteeringBehaviours } from '../../steering/SteeringBehaviours.js';
+import { SteeringBehaviours } from "../../steering/SteeringBehaviours.js";
 
 function reacquireIfDetected(entity, data) {
   const player = data.player;

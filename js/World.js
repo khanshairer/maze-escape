@@ -163,9 +163,9 @@ init() {
   this.map.walkableTiles = this.map.grid.flat().filter(tile => tile.isWalkable());
   this.map2.walkableTiles = this.map2.grid.flat().filter(tile => tile.isWalkable());
   this.dungeonMap.walkableTiles = this.dungeonMap.grid.flat().filter(tile => tile.isWalkable());
-  this.droneHierarchicalPathfinder = new HierarchicalAStar(this.map, {
-    clusterSize: this.droneClusterSize
-  });
+  this.droneHierarchicalPathfinder = new HierarchicalAStar(this.map2, {
+  clusterSize: this.droneClusterSize
+});
 
   // ----- render first maze -----
   this.mazeGroup1 = new THREE.Group();
@@ -303,16 +303,19 @@ init() {
   //this.createGoals(5);
   this.createLoadingIndicator();
   this.createGameplayDrones(4);
-  this.createNPCs(10);
+  //this.createNPCs(10);
   this.createPatrolLoopInDungeon3();
   this.drawDungeon3PatrolLoop();
   this.createDungeonGuard();
+
+  //create energy cells for unlocking controller exit
   this.createEnergyCells(5);
 
-  //this.createGoalsForMap(this.map2, this.map2Offset, 5);
-  this.createNPCsForMap(this.map2, this.map2Offset, 10);
-  this.createEnergyCellsForMap(this.map2, this.map2Offset, 5);
-  this.updateEnergyUnlockRequirement();
+//this.createGoalsForMap(this.map2, this.map2Offset, 5);
+//this.createNPCsForMap(this.map2, this.map2Offset, 10);
+this.createEnergyCellsForMap(this.map2, this.map2Offset, 5);
+this.createEnergyCellsForMap(this.dungeonMap, this.dungeonOffset, 3);
+this.updateEnergyUnlockRequirement();
 }
 
   findFarthestWalkableTile(map, fromTile) {
@@ -849,77 +852,120 @@ connectSideToInterior(map, row, side = 'left') {
 }
 
   createGameplayDrones(numDrones = 4) {
-    this.drones = [];
-    this.modelsLoading += numDrones;
+  this.drones = [];
+  this.modelsLoading += numDrones;
 
-    for (let i = 0; i < numDrones; i++) {
-      const droneTile = this.getValidDroneSpawnTile(this.map, this.drones);
-      const dronePosition = this.map.localize(droneTile);
+  for (let i = 0; i < numDrones; i++) {
+    const droneTile = this.getValidDroneSpawnTile(this.map2, this.drones);
+    const dronePosition = this.map2.localize(droneTile).clone().add(this.map2Offset);
 
-      const drone = new DroneEnemy({
-        spawnTile: droneTile,
-        homeTile: droneTile,
-        patrolMap: this.map,
-        position: dronePosition.clone(),
-        velocity: new THREE.Vector3(0, 0, 0),
-        color: 0xffaa33,
-        scale: new THREE.Vector3(1, 1, 1),
-        topSpeed: 3.5
-      });
+    const drone = new DroneEnemy({
+      spawnTile: droneTile,
+      homeTile: droneTile,
+      patrolMap: this.map2,
+      position: dronePosition.clone(),
+      velocity: new THREE.Vector3(0, 0, 0),
+      color: 0xffaa33,
+      scale: new THREE.Vector3(1, 1, 1),
+      topSpeed: 3.5
+    });
 
-      drone.position.y = 1;
-      drone.mesh.rotation.y = Math.random() * Math.PI * 2;
-      drone.initializeFSM({
-        player: this.main_character,
-        world: this
-      });
-      drone.setPathfinder(this.droneHierarchicalPathfinder);
+    drone.position.y = 1;
+    drone.mesh.rotation.y = Math.random() * Math.PI * 2;
 
-      this.loadDroneVisual(drone);
-      this.drones.push(drone);
-      this.addEntityToWorld(drone);
-    }
+    drone.initializeFSM({
+      player: this.main_character,
+      world: this
+    });
+
+    drone.setPathfinder(this.droneHierarchicalPathfinder);
+
+    this.loadDroneVisual(drone);
+    this.addDroneDetectionCircle(drone);
+
+    this.drones.push(drone);
+    this.addEntityToWorld(drone);
   }
+}
 
   getValidDroneSpawnTile(map, existingDrones = []) {
-    let spawnTile;
-    let spawnPosition;
-    let tries = 0;
+  let spawnTile;
+  let spawnPosition;
+  let tries = 0;
 
-    do {
-      spawnTile = map.getRandomWalkableTile();
-      spawnPosition = map.localize(spawnTile);
-      tries++;
-    } while (
-      tries < 300 &&
-      (
-        spawnPosition.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
-        spawnPosition.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
-        existingDrones.some((drone) => drone.position.distanceTo(spawnPosition) < 5)
-      )
-    );
+  do {
+    spawnTile = map.getRandomWalkableTile();
+    spawnPosition = map.localize(spawnTile);
+    tries++;
+  } while (
+    tries < 300 &&
+    (
+      existingDrones.some((drone) => {
+        const droneLocalPos = drone.position.clone().sub(this.map2Offset);
+        return droneLocalPos.distanceTo(spawnPosition) < 5;
+      })
+    )
+  );
 
-    return spawnTile;
-  }
+  return spawnTile;
+}
 
   loadDroneVisual(drone) {
-    const loader = new GLTFLoader();
-    loader.load(
-      '/animated_drone/scene.gltf',
-      (gltf) => {
-        drone.applyDroneModel(gltf, this.mixers);
-        this.modelsLoaded++;
-        this.updateLoadingIndicator();
-      },
-      undefined,
-      () => {
-        drone.handleLoadError();
-        this.modelsLoaded++;
-        this.updateLoadingIndicator();
-      }
-    );
-  }
+  const loader = new GLTFLoader();
 
+  loader.load(
+    '/animated_drone/scene.gltf',
+    (gltf) => {
+      drone.applyDroneModel(gltf, this.mixers);
+
+      // attach detection circle AFTER model is applied
+      if (drone._pendingDetectionCircle) {
+        drone.mesh.add(drone._pendingDetectionCircle);
+        drone.detectionCircle = drone._pendingDetectionCircle;
+        drone._pendingDetectionCircle = null;
+      }
+
+      this.modelsLoaded++;
+      this.updateLoadingIndicator();
+    },
+    undefined,
+    () => {
+      drone.handleLoadError();
+
+      // still attach circle even if model fails
+      if (drone._pendingDetectionCircle) {
+        drone.mesh.add(drone._pendingDetectionCircle);
+        drone.detectionCircle = drone._pendingDetectionCircle;
+        drone._pendingDetectionCircle = null;
+      }
+
+      this.modelsLoaded++;
+      this.updateLoadingIndicator();
+    }
+  );
+}
+
+addDroneDetectionCircle(drone) {
+  const radius = drone.detectRange ?? drone.detectionRange ?? 6;
+
+  const geometry = new THREE.CircleGeometry(radius, 64);
+
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x66e0ff,      // bluish default
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.25,        
+    depthWrite: false
+  });
+
+  const circle = new THREE.Mesh(geometry, material);
+
+  circle.rotation.x = -Math.PI / 2;
+  circle.position.y = 0.05;
+  circle.renderOrder = 999;
+
+  drone._pendingDetectionCircle = circle;
+}
 
   // create 10 ground attackers in the first maze (for vector pathfinding testing)
   createGroundAttackers(numAttackers = 10) {
@@ -988,7 +1034,7 @@ connectSideToInterior(map, row, side = 'left') {
       },
       undefined,
       (error) => {
-        console.log('❌ failed to load sphere_robot:', error);
+        console.log('failed to load sphere_robot:', error);
         attacker.boatLoaded = true;
         attacker.loadError = true;
         this.modelsLoaded++;
@@ -1248,16 +1294,18 @@ connectSideToInterior(map, row, side = 'left') {
 }
 
   respawnDrone(npc) {
-    const spawnTile = this.getValidDroneSpawnTile(
-      this.map,
-      this.drones.filter((drone) => drone !== npc)
-    );
-    const spawnPos = this.map.localize(spawnTile);
+  const spawnTile = this.getValidDroneSpawnTile(
+    this.map2,
+    this.drones.filter((drone) => drone !== npc)
+  );
 
-    npc.spawnTile = spawnTile;
-    npc.homeTile = spawnTile;
-    npc.resetToSpawn(spawnPos);
-  }
+  const spawnPos = this.map2.localize(spawnTile).clone().add(this.map2Offset);
+
+  npc.spawnTile = spawnTile;
+  npc.homeTile = spawnTile;
+  npc.patrolMap = this.map2;
+  npc.resetToSpawn(spawnPos);
+}
 
   startDroneRespawnCooldown(npc) {
     npc.respawnTimer = this.groundAttackerRespawnDelay;
@@ -1344,14 +1392,13 @@ connectSideToInterior(map, row, side = 'left') {
 
   const target = this.main_character.position.clone();
 
-  // closer + lower camera
-  const desiredPosition = target.clone().add(new THREE.Vector3(0, 15, 8));
+  // higher + a bit farther back so drones are easier to see
+  const desiredPosition = target.clone().add(new THREE.Vector3(0, 24, 14));
 
-  // smooth follow
   this.camera.position.lerp(desiredPosition, 0.08);
 
-  // look at player
-  this.camera.lookAt(target.x, target.y, target.z);
+  // look slightly ahead instead of directly at player feet
+  this.camera.lookAt(target.x, target.y + 2, target.z);
 }
 
 // for maze 2 position update 
@@ -1534,21 +1581,50 @@ updateDrones(dt) {
     drone.position.y = 1;
     if (drone.velocity) drone.velocity.y = 0;
     if (drone.acceleration) drone.acceleration.y = 0;
+
     drone.updateFSM(dt, {
       player: this.main_character,
       world: this
     });
   }
 
-  const minX = this.map.minX + 1;
-  const maxX = this.map.minX + this.map.cols * this.map.tileSize - 1;
-  const minZ = this.map.minZ + 1;
-  const maxZ = this.map.minZ + this.map.rows * this.map.tileSize - 1;
+  const minX = this.map2Offset.x + this.map2.minX + 1;
+  const maxX = this.map2Offset.x + this.map2.minX + this.map2.cols * this.map2.tileSize - 1;
+  const minZ = this.map2.minZ + 1;
+  const maxZ = this.map2.minZ + this.map2.rows * this.map2.tileSize - 1;
 
   for (let drone of this.drones) {
+    if (drone.respawnTimer > 0) continue;
+
     drone.position.x = THREE.MathUtils.clamp(drone.position.x, minX, maxX);
     drone.position.z = THREE.MathUtils.clamp(drone.position.z, minZ, maxZ);
-    this.snapEntityToWalkableTile(drone);
+
+    let localPos = drone.position.clone().sub(this.map2Offset);
+    let tile = this.map2.quantize(localPos);
+
+    if (!tile || !tile.isWalkable()) {
+      let bestTile = null;
+      let bestDist = Infinity;
+
+      for (let walkable of this.map2.walkableTiles) {
+        let safePos = this.map2.localize(walkable).clone().add(this.map2Offset);
+        let dist = safePos.distanceTo(drone.position);
+
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestTile = walkable;
+        }
+      }
+
+      if (bestTile) {
+        let correctedPos = this.map2.localize(bestTile).clone().add(this.map2Offset);
+        drone.position.x = correctedPos.x;
+        drone.position.z = correctedPos.z;
+        drone.velocity.set(0, 0, 0);
+        if (drone.acceleration) drone.acceleration.set(0, 0, 0);
+      }
+    }
+
     drone.position.y = 1;
   }
 }
@@ -1732,9 +1808,9 @@ createDungeonGuard() {
 
         this.dungeonGuard.currentAction = action;
 
-        console.log("✅ dungeon guard animation playing:", clipIndex);
+        console.log("dungeon guard animation playing:", clipIndex);
       } else {
-        console.log("⚠️ no animations found on walking_mario");
+        console.log("no animations found on walking_mario");
       }
     },
     undefined,
@@ -1745,7 +1821,7 @@ createDungeonGuard() {
 
   this.addEntityToWorld(this.dungeonGuard);
 
-  console.log("✅ dungeon guard created at:", this.dungeonGuard.position);
+  console.log("dungeon guard created at:", this.dungeonGuard.position);
 }
 
 updateDungeonGuard(dt) {
@@ -1842,6 +1918,26 @@ updateDungeonGuard(dt) {
     const facingOffset = this.dungeonGuard.modelFacingOffset ?? 0;
     this.dungeonGuard.mesh.rotation.y = moveAngle + facingOffset;
   }
+}
+
+// is player on safe tile in hallway 2 helper function
+isPlayerOnSafeTile() {
+  if (!this.main_character) return false;
+
+  const inMap2 =
+    this.main_character.position.x >= this.map2Offset.x + this.map2.minX &&
+    this.main_character.position.x <= this.map2Offset.x + this.map2.minX + this.map2.cols * this.map2.tileSize &&
+    this.main_character.position.z >= this.map2.minZ &&
+    this.main_character.position.z <= this.map2.minZ + this.map2.rows * this.map2.tileSize;
+
+  if (!inMap2) return false;
+
+  const localPos = this.main_character.position.clone().sub(this.map2Offset);
+  const tile = this.map2.quantize(localPos);
+
+  if (!tile) return false;
+
+  return tile.type === Tile.Type.MediumTerrain;
 }
 // restart 
 reset() {

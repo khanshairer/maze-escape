@@ -41,6 +41,18 @@ export class Game {
         continue;
       }
 
+      const currentStateName = npc.fsm?.state?.constructor?.name;
+
+      // only dangerous in Fight / Attack / Chase state
+      const isDangerous =
+        currentStateName === "FightState" ||
+        currentStateName === "AttackState" ||
+        currentStateName === "ChaseState";
+
+      if (!isDangerous) {
+        continue;
+      }
+
       const distance = player.position.distanceTo(npc.position);
 
       if (distance < 1.5) {

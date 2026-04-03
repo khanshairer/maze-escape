@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { DynamicEntity } from './DynamicEntity.js';
 import { StateMachine } from '../ai/decisions/state-machines/StateMachine.js';
-import { PatrolState } from '../ai/decisions/state-machines/DroneStates.js';
+import { GuardState } from '../ai/decisions/state-machines/GuardState.js';
 import { GroupSteeringBehaviours } from '../ai/steering/GroupSteeringBehaviours.js';
 import { CollisionAvoidSteering } from '../ai/steering/CollisionAvoidSteering.js';
 import { Path } from '../maps/Path.js';
@@ -77,7 +77,7 @@ export class DroneEnemy extends DynamicEntity {
 
   initializeFSM(data) {
     this.fsmData = data;
-    this.fsm = new StateMachine(this, new PatrolState(), data);
+    this.fsm = new StateMachine(this, new GuardState(), data);
   }
 
   updateFSM(dt, dataOverride = null) {
@@ -253,6 +253,7 @@ export class DroneEnemy extends DynamicEntity {
   computeAvoidanceSteering(data) {
     const world = data?.world;
     const activePeers = this.getActivePeers(world);
+
     const separationForce = GroupSteeringBehaviours.separate(
       this,
       activePeers,
@@ -351,6 +352,16 @@ export class DroneEnemy extends DynamicEntity {
     this.loadError = true;
   }
 
+  // different state different color for detection circle to help with debugging
+ setDetectionCircleColor(hexColor, opacity = 0.45) {
+  const ring = this.detectionCircle || this._pendingDetectionCircle;
+  if (!ring || !ring.material) return;
+
+  ring.material.color.setHex(hexColor);
+  ring.material.opacity = opacity;
+  ring.material.needsUpdate = true;
+}
+
   resetToSpawn(spawnPosition) {
     this.position.copy(spawnPosition);
     this.position.y = 1;
@@ -368,7 +379,7 @@ export class DroneEnemy extends DynamicEntity {
     this.clearNavigationPath();
 
     if (this.fsm) {
-      this.fsm.change(new PatrolState());
+      this.fsm.change(new GuardState());
     }
   }
 }
