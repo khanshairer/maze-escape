@@ -21,23 +21,25 @@ export class EnergyCell {
   createMesh() {
     const group = new THREE.Group();
 
+    // Golden core
     const core = new THREE.Mesh(
       new THREE.OctahedronGeometry(0.45, 0),
       new THREE.MeshStandardMaterial({
-        color: 0x7fffd4,
-        emissive: 0x1b8a6b,
-        emissiveIntensity: 1.4
+        color: 0xffaa44,           // bright gold
+        emissive: 0xaa5511,        // warm orange-gold glow
+        emissiveIntensity: 1.2
       })
     );
     core.position.y = 1.1;
     group.add(core);
 
+    // Golden ring
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(0.7, 0.08, 12, 24),
       new THREE.MeshStandardMaterial({
-        color: 0xb8fff1,
-        emissive: 0x2d9c85,
-        emissiveIntensity: 1.1
+        color: 0xffcc66,           // lighter gold
+        emissive: 0xcc8822,        // deeper gold emission
+        emissiveIntensity: 0.9
       })
     );
     ring.rotation.x = Math.PI / 2;

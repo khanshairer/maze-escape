@@ -74,7 +74,7 @@ export class VectorPathFinding {
                 tile.flowVector.copy(direction);
 
                 if (direction.lengthSq() > 0) {
-                    this.drawArrow(tile, direction);
+                    //this.drawArrow(tile, direction);
                 }
             }
         }
