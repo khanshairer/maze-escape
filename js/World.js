@@ -5,7 +5,6 @@ import { TileMap } from './maps/TileMap.js'; // for creating and managing the ti
 import { Tile } from './maps/Tile.js'; // for representing individual tiles in the tile maps with properties like type and walkability
 import { TileMapRenderer } from './renderers/TileMapRenderer.js'; // for rendering the tile maps visually in the scene
 import { DynamicEntity } from './entities/DynamicEntity.js'; // for representing dynamic entities in the world
-import { EnergyCell } from './entities/EnergyCell.js'; // creating main goal objects in the world
 import { GLTFLoader } from 'three/examples/jsm/Addons.js'; // for loading 3D models in GLTF format for the main character and other entities
 import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js'; // for implementing vector path finding..
 import { HierarchicalAStar } from './ai/pathfinding/HierarchicalAStar.js'; // for implementing hierarchical pathfinding for drones in maze 2
@@ -15,9 +14,13 @@ import { GroundAttackers } from './entities/GroundAttackers.js';
 import { DroneEntity } from './entities/DroneEntity.js';
 import { DungeonGuard } from './entities/DungeonGuard.js';
 import { MainCharacter } from './entities/MainCharacter.js';
+import { EnergyCellManager } from './gameLogic/EnergyCellManager.js';
+import { ControllerExitManager } from './gameLogic/ControllerExitManager.js';
+
 /**
  * World class holds all information about our game's world
  */
+
 export class World {
 
   // Creates a world instance
@@ -31,7 +34,8 @@ export class World {
     this.entities = [];
  
     // added ................
-    this.droneRespawnDelay = 1.0;
+    this.droneRespawnDelay = 0.8;
+    this.controllerExitManager = new ControllerExitManager(this);
     this.goals = []; // store goals entities for easy access
     this.npcs = []; // store npc entities for easy access
     this.mixers = []; // store animation mixers for updating in the main loop ..for animation purposes
@@ -229,7 +233,7 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
     this.dungeonMap,
     this.dungeonEntryTile
   );
-  this.createControllerExit();
+  this.controllerExitManager.createControllerExit();
 
   // -------- DOOR GOAL --------
   this.doorGoal = this.map.grid[row1][this.map.cols - 1];
@@ -256,63 +260,7 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
   this.groundVectorPathFinding.buildCostField(this.doorGoal);
   this.groundVectorPathFinding.allTileArrows(this.doorGoal);
 
-  // ----- MAIN CHARACTER LOADING -----
-  const tempCubeGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-  const tempCubeMat = new THREE.MeshStandardMaterial({
-    color: 0x33aaff,
-    emissive: 0x004466,
-    transparent: true,
-    opacity: 0.8
-  });
-  const tempCube = new THREE.Mesh(tempCubeGeo, tempCubeMat);
-  tempCube.position.set(0, 0.75, 0);
-  this.main_character.mesh.add(tempCube);
-
-  const loadingRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.8, 0.1, 16, 32),
-    new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0x442200 })
-  );
-  loadingRing.position.set(0, 1.2, 0);
-  this.main_character.mesh.add(loadingRing);
-  this.main_character.loadingRing = loadingRing;
-
-  const loader = new GLTFLoader();
-  loader.load(
-    '/officer_with_gun/scene.gltf',
-    (gltf) => {
-      const model = gltf.scene;
-
-      while (this.main_character.mesh.children.length > 0) {
-        this.main_character.mesh.remove(this.main_character.mesh.children[0]);
-      }
-
-      model.scale.set(1.8, 1.8, 1.8);
-
-      const box = new THREE.Box3().setFromObject(model);
-      model.position.y = -box.min.y;
-
-      this.main_character.mesh.add(model);
-
-      if (gltf.animations && gltf.animations.length > 0) {
-        const mixer = new THREE.AnimationMixer(model);
-        this.mainCharacterMixer = mixer;
-
-        gltf.animations.forEach((clip, idx) => {
-          const action = mixer.clipAction(clip);
-          this.mainCharacterActions[idx] = action;
-        });
-
-        const idleAction = this.mainCharacterActions[0];
-        if (idleAction) {
-          idleAction.play();
-          this.currentMainAction = idleAction;
-        }
-      }
-    }
-  );
-
-  this.addEntityToWorld(this.main_character);
-
+  
   //this.createGoals(5);
   this.createLoadingIndicator();
   
@@ -332,13 +280,14 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
 
 
   //create energy cells for unlocking controller exit
-  this.createEnergyCells(3);
+  this.energyCellManager = new EnergyCellManager(this);
+  this.energyCellManager.createEnergyCells(3);
 
 //this.createGoalsForMap(this.map2, this.map2Offset, 5);
 //this.createNPCsForMap(this.map2, this.map2Offset, 10);
-this.createEnergyCellsForMap(this.map2, this.map2Offset, 3);
-this.createEnergyCellsForMap(this.dungeonMap, this.dungeonOffset, 3);
-this.updateEnergyUnlockRequirement();
+this.energyCellManager.createEnergyCellsForMap(this.map2, this.map2Offset, 3);
+this.energyCellManager.createEnergyCellsForMap(this.dungeonMap, this.dungeonOffset, 3);
+this.controllerExitManager.updateEnergyUnlockRequirement();
 }
 
  
@@ -374,171 +323,8 @@ findFarthestWalkableTile (map, fromTile) {
 
     return farthestTile;
   }
-
-
-  /*
-  Purpose : createControllerExit is a method that creates the controller exit object in the dungeon based on the controllerExitTile location, 
-  and sets up its visual appearance and properties for unlocking and activation.
   
-  */
-  createControllerExit() {
-    
-    if (!this.controllerExitTile) {
-      return;
-    }
-
-    const exitPosition = this.dungeonMap
-      .localize(this.controllerExitTile)
-      .clone()
-      .add(this.dungeonOffset);
-
-    const group = new THREE.Group();
-    group.position.copy(exitPosition);
-
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.1, 1.3, 0.4, 24),
-      new THREE.MeshStandardMaterial({
-        color: 0x30363d,
-        emissive: 0x111111
-      })
-    );
-
-    base.position.y = 0.2;
-    group.add(base);
-
-    const coreMaterial = new THREE.MeshStandardMaterial({
-      color: 0xff5533,
-      emissive: 0x661100,
-      emissiveIntensity: 1.2
-    });
-
-    const core = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.55, 0.55, 1.8, 18),
-      coreMaterial
-    );
-    core.position.y = 1.2;
-    group.add(core);
-
-    const beacon = new THREE.Mesh(
-      new THREE.TorusGeometry(0.95, 0.08, 12, 24),
-      new THREE.MeshStandardMaterial({
-        color: 0xffaa44,
-        emissive: 0x553300,
-        emissiveIntensity: 0.9
-      })
-    );
-    beacon.rotation.x = Math.PI / 2;
-    beacon.position.y = 1.2;
-    group.add(beacon);
-
-    group.userData = {
-      base,
-      core,
-      beacon,
-      lockedColor: 0xff5533,
-      lockedEmissive: 0x661100,
-      unlockedColor: 0x33ff99,
-      unlockedEmissive: 0x116644
-    };
-
-    this.controllerExit = {
-      mesh: group,
-      position: exitPosition,
-      tile: this.controllerExitTile
-    };
-
-    this.scene.add(group);
-    this.updateControllerExitVisualState(0);
-  }
-
-  /*
-  Purpose : updateControllerExitVisualState is a method that updates the visual appearance of the controller exit in the dungeon based on whether it is currently unlocked or locked.
-  Parameters: timestep(dt) - the time elapsed since the last update
-  */
-  updateControllerExitVisualState(dt = 0) {
-    
-    if (!this.controllerExit) {
-      return;
-    }
-
-    const { core, beacon, lockedColor, lockedEmissive, unlockedColor, unlockedEmissive } =
-      this.controllerExit.mesh.userData;
-
-    if (this.controllerExitUnlocked) {
-      
-      core.material.color.setHex(unlockedColor);
-      core.material.emissive.setHex(unlockedEmissive);
-      beacon.material.color.setHex(0xaaffdd);
-      beacon.material.emissive.setHex(0x227755);
-      beacon.rotation.z += dt * 1.5;
-    
-    } else {
-      core.material.color.setHex(lockedColor);
-      core.material.emissive.setHex(lockedEmissive);
-      beacon.material.color.setHex(0xffaa44);
-      beacon.material.emissive.setHex(0x553300);
-      beacon.rotation.z += dt * 0.35;
-    }
-  }
-
-
-  /*
-  Purpose : updateControllerExitState is a method that checks if the controller exit in the dungeon should be unlocked based on the number of energy cells collected by the player
-  Paramters : timestep(dt) - the time elapsed since the last update, which can be used to create smooth animations for the controller exit's visual state changes 
-  when it transitions between locked and unlocked states based on energy cell collection. This method updates the controller exit's unlocked state and visual appearance accordingly.
-  */
-  updateControllerExitState(dt) {
-    
-    if (!this.controllerExit) {
-      return;
-    }
-
-    this.controllerExitUnlocked =
-      this.energyCellsRequiredForUnlock > 0 &&
-      this.collectedEnergyCells >= this.energyCellsRequiredForUnlock;
-
-    this.updateControllerExitVisualState(dt);
-  }
-
-
-  /*
-  Purpose : updateEnergyUnlockRequirement is a method that calculates the number of energy cells required to unlock the controller exit in the dungeon based on the total number of energy cells in the world 
-  and a predefined fraction that determines the unlock requirement.
   
-  Parameters: none, but it uses the totalEnergyCells property of the world to calculate the energyCellsRequiredForUnlock based on the unlockRequirementFraction. 
-  */
-  updateEnergyUnlockRequirement() {
-    
-    this.energyCellsRequiredForUnlock = Math.ceil(
-      this.totalEnergyCells * this.unlockRequirementFraction
-    );
-  }
-
-  
-  /*
-  Purpose : isPlayerAtUnlockedControllerExit is a method that checks if the main character (player) is within a certain activation radius of the controller exit 
-  in the dungeon and if the exit is unlocked, which would allow the player to win the game by reaching the exit after collecting enough energy cells to unlock it. 
-  This method is used to determine if the player has successfully reached the win condition of the game by activating the controller exit after unlocking it.
-  
-  parameters: none, but it uses the main_character's position
-  */
-  isPlayerAtUnlockedControllerExit() {
-    
-    if (
-      !this.main_character ||
-      !this.controllerExit ||
-      !this.controllerExitUnlocked
-    ) {
-      
-      return false;
-    }
-
-    return (
-      this.main_character.position.distanceTo(this.controllerExit.position) <=
-      this.controllerExitActivationRadius
-    );
-  }
-
   /*
   Purpose: findClosestWalkableRow is a method that takes in a tile map, a preferred row index, and a side ('left' or 'right'), 
   and searches for the closest walkable row to the preferred row on the specified side of the map.
@@ -999,149 +785,6 @@ Purpose: updateLoadingIndicator is a method that updates the loading indicator d
   }
 }
 
-
-  // create energy cells in the first maze
-  createEnergyCells(numCells = 5) {
-    
-  this.spawnEnergyCells(this.map, new THREE.Vector3(0, 0, 0), numCells);
-  
-}
-
-  // create energy cells for a specific map with offset (for second maze)
-  createEnergyCellsForMap(map, offset, numCells = 5) {
-    
-    this.spawnEnergyCells(map, offset, numCells);
-  }
-
-  // Spawn energy cells in a given map with offset, ensuring they are placed on valid tiles
-  /*
-  purpose: spawn energy cells in a specified map with a positional offset, ensuring that they are placed on valid tiles that are walkable, 
-  not occupied by other energy cells, and not on the player's current tile.
-
-  parameters:
-- map: the map in which to spawn energy cells
-- offset: the positional offset to apply when placing energy cells (used for second maze)
-- numCells: the number of energy cells to spawn (default is 5)
-  */
-  spawnEnergyCells(map, offset, numCells = 5) {
-    
-    let createdCount = 0;
-    let attempts = 0;
-    const maxAttempts = 1000;
-
-    while (createdCount < numCells && attempts < maxAttempts) {
-      attempts++;
-
-      const randomTile =
-        map.walkableTiles[Math.floor(Math.random() * map.walkableTiles.length)];
-
-      if (!this.isValidEnergyCellTile(map, randomTile, offset)) {
-        continue;
-      }
-
-      const cell = new EnergyCell({
-        
-        tile: randomTile,
-        map,
-        offset,
-        position: map.localize(randomTile).clone().add(offset)
-      
-      });
-
-      this.energyCells.push(cell);
-      this.totalEnergyCells++;
-      this.scene.add(cell.mesh);
-      createdCount++;
-    }
-  }
-
-  // Check if a tile is valid for placing an energy cell (walkable, not occupied, not on player)
-  /*
-  Purpose: determine if a given tile is suitable for placing an energy cell by checking if it's walkable, not already occupied by another energy cell, 
-  and not the player's current tile.
-  
-  parameters:
-- map: the map to check against
-- tile: the tile being evaluated for energy cell placement
-- offset: the positional offset to apply when checking against the player's position (used for second maze)
-
-  */
-  isValidEnergyCellTile(map, tile, offset) {
-    
-    if (!tile || !tile.isWalkable()) {
-      
-      return false;
-    
-    }
-
-    const occupied = this.energyCells.some(
-      
-      (cell) =>
-        cell.map === map &&
-        cell.tile.row === tile.row &&
-        cell.tile.col === tile.col
-    
-      );
-
-    if (occupied) {
-      
-      return false;
-    
-    }
-
-    if (!this.main_character || map !== this.map) {
-      
-      return true;
-    
-    }
-
-    const playerTile = map.quantize(
-      
-      this.main_character.position.clone().sub(offset)
-    
-    );
-
-    return !(playerTile.row === tile.row && playerTile.col === tile.col);
-  }
-
-  
-  // Update energy cells - check for collection and update state
-  /*
-  * purpose: update the state of energy cells and check for collection by the main character.
-  * approach: iterate through each energy cell, update its state, and check if it has been collected.
-  */
-  updateEnergyCells(dt) {
-    
-    if (!this.main_character || this.energyCells.length === 0) {
-      
-      return;
-    
-    }
-
-    for (let cell of this.energyCells) {
-      
-      if (cell.collected) {
-        
-        continue;
-
-      }
-
-      cell.update(dt);
-
-      if (
-        
-        this.main_character.position.distanceTo(cell.position) <=
-        this.energyCellCollectionRadius
-      
-      ) {
-        
-        cell.collect();
-        this.collectedEnergyCells++;
-      
-      }
-    }
-  }
-
   // Add an entity to the world
   /*
   * purpose: add an entity to the game world and manage its lifecycle.
@@ -1528,8 +1171,8 @@ reset() {
     }
   }
 
-  this.updateEnergyCells(dt);
-  this.updateControllerExitState(dt);
+  this.energyCellManager.updateEnergyCells(dt);
+  this.controllerExitManager.updateControllerExitState(dt);
 
   // keep player stable inside dungeon bounds
   if (this.main_character) {
