@@ -1,9 +1,19 @@
+/*
+
+MazeGenerator is a class that provides methods for generating mazes using a depth-first search (DFS) algorithm.
+The generate method creates a maze on a given map by carving paths between walkable tiles. 
+The braidedGenerate method creates a maze and then adds additional connections between dead-end tiles to create loops, making the maze less linear and more complex. The shuffle method is a utility function used to randomize the order of adjacent tiles during the carving process.
+The class does not maintain any state and all methods are static, allowing for easy maze generation without needing to instantiate the class.
+
+*/
 export class MazeGenerator {
 
   static generate(map) {
+    
     let visited = new Set();
     let start = map.getRandomWalkableTile();
     this.carve(start, visited, map);
+  
   }
 
   static carve(tile, visited, map) {
@@ -53,6 +63,7 @@ export class MazeGenerator {
     }
   }
 
+  
   static braidedGenerate(map, probability) {
 
     // Create a perfect maze using dfs
@@ -110,11 +121,14 @@ export class MazeGenerator {
 
 
   static shuffle(array) {
+    
     for (let i = array.length - 1; i > 0; i--) {
+      
       let j = Math.floor(Math.random() * (i + 1));
       let temp = array[j];
       array[j] = array[i];
       array[i] = temp;
+    
     }
   }
 

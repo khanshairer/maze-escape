@@ -35,6 +35,12 @@ export class InputHandler {
     }
 
     // Returns a force vector based on pressed keys and camera direction
+    /*
+    Purpose: getForce is a method that calculates a movement force vector based on the currently pressed WASD keys 
+    and the direction the camera is facing. It first checks which movement keys are pressed to determine the intended direction of movement, then it calculates the camera's forward direction and applies the camera's rotation to the movement vector. Finally, it scales the force vector by a given strength value before returning it.
+    
+    Parameters: strength - a scalar value that determines how strong the resulting force vector should be.
+    */
     getForce(strength) {
         let force = new THREE.Vector3();
 

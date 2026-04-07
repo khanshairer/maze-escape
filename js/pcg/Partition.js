@@ -1,3 +1,17 @@
+/*
+
+Partition is a class that represents a rectangular area of the maze and is used for the binary space partitioning (BSP) algorithm to generate 
+the maze layout. 
+
+Each Partition instance has properties for its position (x, y) and dimensions (width, height), as well as references to its left and right 
+child partitions. 
+
+The split method divides the partition into two smaller partitions either horizontally or vertically based on random choice and 
+the minimum size constraint. 
+
+The getLeaves method retrieves all the leaf partitions, which represent the final rooms in the maze after all splits are completed.
+
+*/
 export class Partition {
   constructor(x, y, width, height) {
     this.x = x;
@@ -87,5 +101,7 @@ export class Partition {
 }
 
 function randomInt(min, max) {
+
   return Math.floor(Math.random() * (max - min + 1)) + min;
+
 }

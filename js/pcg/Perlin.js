@@ -1,3 +1,12 @@
+/*
+
+Perlin is a class that implements Perlin noise, a type of gradient noise used in procedural generation to create natural-looking textures 
+and terrains. The class provides methods for generating noise values based on a grid of random gradients, as well as an octaveNoise method 
+that combines multiple layers of noise to create more complex patterns. The fade and lerp methods are used to smooth the transitions between 
+noise values and interpolate between them, respectively. The constructor initializes the grid of gradients based on a specified size, 
+allowing for customizable noise generation.
+
+*/
 export class Perlin {
   
   constructor(size) {

@@ -27,10 +27,13 @@ export class TileMap extends LevelMap {
   generateGrid() {
     // Step 1: fill the whole grid with obstacles
     for (let r = 0; r < this.rows; r++) {
+      
       let row = [];
 
       for (let c = 0; c < this.cols; c++) {
+        
         row.push(new Tile(r, c, Tile.Type.Obstacle));
+      
       }
 
       this.grid.push(row);
@@ -54,6 +57,7 @@ export class TileMap extends LevelMap {
 
   // Recursive DFS maze carving
   carveMaze(row, col) {
+    
     this.grid[row][col].type = Tile.Type.EasyTerrain;
 
     let directions = [
@@ -66,6 +70,7 @@ export class TileMap extends LevelMap {
     this.shuffle(directions);
 
     for (let d of directions) {
+      
       let newRow = row + d[0];
       let newCol = col + d[1];
 
@@ -89,8 +94,11 @@ export class TileMap extends LevelMap {
 
   // Assign random terrain types only on walkable path tiles
   assignTerrainToPaths() {
+    
     for (let r = 0; r < this.rows; r++) {
+      
       for (let c = 0; c < this.cols; c++) {
+        
         let tile = this.grid[r][c];
 
         if (tile.isWalkable()) {
@@ -107,7 +115,9 @@ export class TileMap extends LevelMap {
 
   // Shuffle helper
   shuffle(array) {
+    
     for (let i = array.length - 1; i > 0; i--) {
+      
       let j = Math.floor(Math.random() * (i + 1));
       [array[i], array[j]] = [array[j], array[i]];
     }
@@ -122,13 +132,16 @@ export class TileMap extends LevelMap {
 
     // Iterate over the directions
     for (let d of directions) {
+      
       let r = tile.row + d[0];
       let c = tile.col + d[1];
 
       // If the neighbouring tile is walkable
       // and it exists, add it to our list of neighbours
       if (this.isInGrid(r, c) && this.grid[r][c].isWalkable()) {
+        
         neighbours.push(this.grid[r][c]);
+      
       }
     }
 
@@ -137,6 +150,7 @@ export class TileMap extends LevelMap {
 
   // Test if in the grid
   isInGrid(row, col) {
+    
     return (
       row >= 0 && row < this.rows &&
       col >= 0 && col < this.cols
@@ -168,7 +182,9 @@ export class TileMap extends LevelMap {
 
   // Get random walkable tile
   getRandomWalkableTile() {
+    
     let index = Math.floor(Math.random() * this.walkableTiles.length);
+    
     return this.walkableTiles[index];
   }
 
@@ -176,6 +192,7 @@ export class TileMap extends LevelMap {
   // it will move between tiles where there is no edge
   // Applied in DynamicEntity update() in place of wrapPosition()
   handleCollisions(entity) {
+    
     let pos = entity.position.clone();
     let radius = Math.max(entity.scale.x, entity.scale.z) / 2;
 
@@ -187,29 +204,42 @@ export class TileMap extends LevelMap {
 
     // pushes position.z if collision north
     if (tile.row === 0 || !neighbours.includes(this.grid[tile.row - 1][tile.col])) {
+      
       let dz = pos.z - (center.z - half);
+      
       if (Math.abs(dz) < radius)
+        
         pos.z += Math.sign(dz || 1) * (radius - Math.abs(dz));
-    }
+    
+      }
 
     // pushes position.z if collision south
     if (tile.row === this.rows - 1 || !neighbours.includes(this.grid[tile.row + 1][tile.col])) {
+      
       let dz = pos.z - (center.z + half);
+      
       if (Math.abs(dz) < radius)
+        
         pos.z += Math.sign(dz || 1) * (radius - Math.abs(dz));
     }
 
     // pushes position.x if collision west
     if (tile.col === 0 || !neighbours.includes(this.grid[tile.row][tile.col - 1])) {
+      
       let dx = pos.x - (center.x - half);
+      
       if (Math.abs(dx) < radius)
+        
         pos.x += Math.sign(dx || 1) * (radius - Math.abs(dx));
     }
 
     // pushes position.x if collision east
     if (tile.col === this.cols - 1 || !neighbours.includes(this.grid[tile.row][tile.col + 1])) {
+      
       let dx = pos.x - (center.x + half);
+      
       if (Math.abs(dx) < radius)
+        
         pos.x += Math.sign(dx || 1) * (radius - Math.abs(dx));
     }
 
