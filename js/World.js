@@ -11,12 +11,10 @@ import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js'; // fo
 import { HierarchicalAStar } from './ai/pathfinding/HierarchicalAStar.js'; // for implementing hierarchical pathfinding for drones in maze 2
 import { DebugVisuals } from './debug/DebugVisuals.js'; // for deugging purposes..
 import { DungeonGenerator } from './pcg/DungeonGenerator.js'; // for procedurally generating the dungeon map with rooms and corridors for the third part of the world
-import { JPS } from './ai/pathfinding/JPS.js'; // importing jumppointsearch functionality 
-import { ReynoldsPathFollowing } from './ai/steering/ReynoldsPathFollowing.js'; //implements reynolds path following...
-import { SteeringBehaviours } from './ai/steering/SteeringBehaviours.js'; // for puruse 
 import { GroundAttackers } from './entities/GroundAttackers.js';
 import { DroneEntity } from './entities/DroneEntity.js';
-
+import { DungeonGuard } from './entities/DungeonGuard.js';
+import { MainCharacter } from './entities/MainCharacter.js';
 /**
  * World class holds all information about our game's world
  */
@@ -240,13 +238,8 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
   }
 
   // main character
-  this.main_character = new DynamicEntity({
-    position: new THREE.Vector3(0, 0, 0),
-    velocity: new THREE.Vector3(0, 0, 0),
-    topSpeed: this.moveSpeed,
-    color: 0x3333ff,
-    scale: new THREE.Vector3(1, 1, 1)
-  });
+  this.mainCharacterManager = new MainCharacter(this);
+  this.mainCharacterManager.createMainCharacter();
 
   // crreate 10 ground attackers
   this.groundAttackerManager = new GroundAttackers(this);
@@ -326,10 +319,17 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
   // Drone manager
   this.droneManager = new DroneEntity(this);
   this.droneManager.create(3); // create 10 drones in maze 2 to chase the player and create dynamic and challenging gameplay as they navigate through the larger and more complex maze 2, while also showcasing the hierarchical pathfinding with a cluster size of 5 for good performance and still intelligent movement from the drones as they pursue the player through maze 2
+
   
-  this.createPatrolLoopInDungeon3();
-  this.drawDungeon3PatrolLoop();
-  this.createDungeonGuard();
+  // Dungeon guard Mananager
+  this.dungeonGuardManager = new DungeonGuard(this);
+
+  this.dungeonGuardManager.createPatrolLoopInDungeon3();
+  
+  this.dungeonGuardManager.drawDungeon3PatrolLoop();
+
+  this.dungeonGuardManager.createDungeonGuard();
+
 
   //create energy cells for unlocking controller exit
   this.createEnergyCells(3);
@@ -1156,115 +1156,7 @@ Purpose: updateLoadingIndicator is a method that updates the loading indicator d
   }
 
   
-// Update main character movement using steering behaviours
-  /*
-*purpose: compute a steering force based on player input to move the main character, and handle jumping physics. Also switch between idle and walk animations based on movement.
 
-*approach: calculate desired velocity from input, compute steering force as the difference between desired and current velocity, apply it to the character,
- and handle jump initiation and physics. For animation, check if the character is moving and crossfade between idle and walk animations.
-
- *timeStep -> null
-*/
-  updateMainCharacter(dt) {
-    
-    const input = this.inputHandler;
-    
-    if (!input) return;
-
-    // Compute desired movement direction in world space
-    let desiredVelocity = input.getForce(this.moveSpeed);
-
-    // Steering force = (desired - current) clamped to maxForce
-    const currentVel = this.main_character.velocity;
-    const steering = desiredVelocity.clone().sub(currentVel);
-    steering.clampLength(0, this.maxForce);
-
-    // Apply the steering force to the character
-    this.main_character.applyForce(steering);
-
-    // Start jump when space is pressed
-    if (input.keys.space && !this.isJumping) {
-      
-      this.isJumping = true;
-      this.jumpVelocity = this.jumpStrength;
-    
-    }
-
-    // Apply jump physics
-    if (this.isJumping) {
-      
-      this.main_character.position.y += this.jumpVelocity * dt;
-      this.jumpVelocity -= this.gravity * dt;
-
-      if (this.main_character.position.y <= this.groundY) {
-        
-        this.main_character.position.y = this.groundY;
-        this.jumpVelocity = 0;
-        this.isJumping = false;
-      
-      }
-    }
-
-    // Debug logging (once per second)
-    if (!this.logCounter) this.logCounter = 0;
-    
-    this.logCounter++;
-    
-    if (this.logCounter >= 60) {
-      
-      this.logCounter = 0;
-    }
-
-    // Animation switching based on speed
-    const isMoving = desiredVelocity.length() > 0.1;
-    
-    if (isMoving) {
-      
-      const walkAction = this.mainCharacterActions[3];
-      const idleAction = this.mainCharacterActions[0];
-      
-      if (walkAction && this.currentMainAction !== walkAction) {
-        
-        if (idleAction) idleAction.fadeOut(0.2);
-        walkAction.reset().fadeIn(0.2).play();
-        this.currentMainAction = walkAction;
-      }
-    
-    } else {
-      
-      const idleAction = this.mainCharacterActions[0];
-      const walkAction = this.mainCharacterActions[1];
-      
-      if (idleAction && this.currentMainAction !== idleAction) {
-        
-        if (walkAction) walkAction.fadeOut(0.2);
-        
-        idleAction.reset().fadeIn(0.2).play();
-        this.currentMainAction = idleAction;
-      
-      }
-    }
-}
-
-/*
-purpose : update the camera to follow the main character 
-approach: smoothly interpolate the camera position to a point above and behind the character, and look slightly ahead of the character for better visibility
-null -> null
-*/
-updateCameraFollow() {
-  
-  if (!this.main_character) return;
-  const target = this.main_character.position.clone();
-
-  // higher + a bit farther back so drones are easier to see
-  const desiredPosition = target.clone().add(new THREE.Vector3(0, 24, 14));
-
-  this.camera.position.lerp(desiredPosition, 0.08);
-
-  // look slightly ahead instead of directly at player feet
-  this.camera.lookAt(target.x, target.y + 2, target.z);
-
-}
 
 // for maze 2 position update
 /*
@@ -1452,340 +1344,6 @@ snapEntityToWalkableTile(entity) {
 }
 
 
-
-
-
-// helper function to create partol loop 
-/*
-*purpose: create a patrol loop for the dungeon guard in dungeon 3 by finding walkable anchor points near the corners of the dungeon,
- and using JPS pathfinding to connect them into a loop. 
-*The resulting patrol path is stored in this.dungeonPatrolPath, and can be visualized with drawDungeon3PatrolLoop
-*@returns null
-*/
-createPatrolLoopInDungeon3() {
-  
-  if (!this.dungeonMap.walkableTiles || this.dungeonMap.walkableTiles.length === 0) {
-    this.dungeonMap.walkableTiles =
-      this.dungeonMap.grid.flat().filter(t => t.isWalkable());
-  }
-
-  const nearestWalkable = (r, c) => {
-    let best = null;
-    let bestDist = Infinity;
-
-    for (let t of this.dungeonMap.walkableTiles) {
-      
-      let d = Math.abs(t.row - r) + Math.abs(t.col - c);
-      
-      if (d < bestDist) {
-        bestDist = d;
-        best = t;
-      }
-    }
-    return best;
-  };
-
-  const anchors = [
-    nearestWalkable(2, 2),
-    nearestWalkable(2, this.dungeonMap.cols - 3),
-    nearestWalkable(this.dungeonMap.rows - 3, this.dungeonMap.cols - 3),
-    nearestWalkable(this.dungeonMap.rows - 3, 2)
-  ].filter(Boolean);
-
-  const uniqueAnchors = [];
-  const seen = new Set();
-
-  for (let tile of anchors) {
-    
-    const key = `${tile.row},${tile.col}`;
-    
-    if (!seen.has(key)) {
-      seen.add(key);
-      uniqueAnchors.push(tile);
-    }
-  }
-
-  if (uniqueAnchors.length < 2) {
-    this.dungeonPatrolTiles = [];
-    this.dungeonPatrolPath = [];
-    return;
-  }
-
-  const pathfinder = new JPS(this.dungeonMap);
-
-  this.dungeonPatrolTiles = [];
-
-  for (let i = 0; i < uniqueAnchors.length; i++) {
-    
-    const start = uniqueAnchors[i];
-    const goal = uniqueAnchors[(i + 1) % uniqueAnchors.length];
-
-    let segment = pathfinder.findPath(start, goal);
-
-    if (!segment || segment.length === 0) {
-
-      continue;
-    
-    }
-
-    if (i > 0) {
-
-      segment.shift();
-    
-    }
-
-    this.dungeonPatrolTiles.push(...segment);
-  }
-
-  if (!this.dungeonPatrolTiles || this.dungeonPatrolTiles.length < 2) {
-    
-    this.dungeonPatrolPath = [];
-    return;
-  
-  }
-
-  this.dungeonPatrolPath = this.dungeonPatrolTiles.map(tile =>
-  this.dungeonMap.localize(tile).clone().add(this.dungeonOffset)
-  
-);
-}
-
-// helper function to visualize the patrol loop in dungeon 3
-/*
-*purpose: visualize the patrol loop for the dungeon guard in dungeon 3 by creating a THREE.LineLoop object that connects the points in this.dungeonPatrolPath. 
-*The line is added to the scene and stored in this.dungeonPatrolLine for later removal if needed.
-*@returns null
-*/
-drawDungeon3PatrolLoop() {
-  
-  if (!this.dungeonPatrolPath || this.dungeonPatrolPath.length < 2) return;
-
-  if (this.dungeonPatrolLine) {
-    
-    this.scene.remove(this.dungeonPatrolLine);
-  
-  }
-
-  const points = this.dungeonPatrolPath.map(p => new THREE.Vector3(p.x, 1.5, p.z));
-  const geometry = new THREE.BufferGeometry().setFromPoints(points);
-  const material = new THREE.LineBasicMaterial({ color: 0xffff00 });
-
-  this.dungeonPatrolLine = new THREE.LineLoop(geometry, material);
-  this.scene.add(this.dungeonPatrolLine);
-
-}
-
-// create dungeon guard patrol loop in dungeon 3
-/**purpose: create a dungeon guard entity in dungeon 3 that patrols along the path defined by this.dungeonPatrolPath. 
-*The guard is represented as a DynamicEntity with a GLTF model, and has properties for chasing the player when they are within a certain radius. 
-*The guard's update method will use steering behaviors to either follow the patrol path or pursue the player based on their distance.
-*@returns null
-*/
-createDungeonGuard() {
-  
-  if (!this.dungeonPatrolPath || this.dungeonPatrolPath.length < 2) {
-    
-    return;
-  
-  }
-
-  const spawnIndex = Math.floor(this.dungeonPatrolPath.length / 2);
-  const startPos = this.dungeonPatrolPath[spawnIndex].clone();
-
-  this.dungeonGuard = new DynamicEntity({
-    position: new THREE.Vector3(startPos.x, 1.0, startPos.z),
-    velocity: new THREE.Vector3(0, 0, 0),
-    topSpeed: 4.4,
-    color: 0xff0000,
-    scale: new THREE.Vector3(1, 1, 1)
-  });
-
-  this.dungeonGuard.isDungeonGuard = true;
-  this.dungeonGuard.maxForce = 8.0;
-
-  this.dungeonGuard.pathFollower = {
-    path: this.dungeonPatrolPath,
-    segmentIndex: spawnIndex,
-    pathRadius: 0.25,
-    predictDistance: 0.15,
-    targetOffset: 0.08
-  };
-
-  this.dungeonGuard.modelFacingOffset = 0;
-  this.dungeonGuard.detectRadius = 12;
-  this.dungeonGuard.catchRadius = 1.5;
-  this.dungeonGuard.isChasing = false;
-  this.dungeonGuard.lookAhead = 0.6;
-
-  const tempBody = new THREE.Mesh(
-    new THREE.BoxGeometry(1.2, 2.0, 1.2),
-    new THREE.MeshStandardMaterial({
-      color: 0xff0000,
-      emissive: 0x330000
-    })
-  );
-  tempBody.position.set(0, 1.0, 0);
-  this.dungeonGuard.mesh.add(tempBody);
-  this.dungeonGuard.tempBody = tempBody;
-
-  const loader = new GLTFLoader();
-  loader.load(
-    '/walking_mario/scene.gltf',
-    (gltf) => {
-      const model = gltf.scene;
-
-      if (this.dungeonGuard.tempBody) {
-        this.dungeonGuard.mesh.remove(this.dungeonGuard.tempBody);
-        this.dungeonGuard.tempBody.geometry.dispose();
-        this.dungeonGuard.tempBody.material.dispose();
-        this.dungeonGuard.tempBody = null;
-      }
-
-      while (this.dungeonGuard.mesh.children.length > 0) {
-        this.dungeonGuard.mesh.remove(this.dungeonGuard.mesh.children[0]);
-      }
-
-      model.scale.set(0.015, 0.015, 0.015);
-
-      const box = new THREE.Box3().setFromObject(model);
-      model.position.y = -box.min.y;
-      model.rotation.y = 0;
-
-      this.dungeonGuard.mesh.add(model);
-      this.dungeonGuard.guardModel = model;
-
-      if (gltf.animations && gltf.animations.length > 0) {
-        
-        const mixer = new THREE.AnimationMixer(model);
-        this.dungeonGuard.mixer = mixer;
-        this.mixers.push(mixer);
-
-        const clipIndex = gltf.animations[1] ? 1 : 0;
-        const action = mixer.clipAction(gltf.animations[clipIndex]);
-        action.reset();
-        action.setEffectiveTimeScale(0.35);
-        action.play();
-
-        this.dungeonGuard.currentAction = action;
-
-      } 
-    },
-    undefined,
-    (error) => {
-    }
-  );
-
-  this.addEntityToWorld(this.dungeonGuard);
-
-}
-
-// Update the dungeon guard's movement and chasing behaviour in dungeon 3
-/*
-*purpose: update the position and behavior of the dungeon guard in dungeon 3 by using steering behaviors to either follow its patrol path or pursue the player when they are within a certain radius. 
-*The guard will also be clamped within the bounds of the dungeon and will snap to walkable tiles to prevent it from escaping into the hallway.
-*@param {number} dt - the time step for the update
-*@returns null
-*/
-updateDungeonGuard(dt) {
-  
-  if (!this.dungeonGuard) return;
-  if (!this.dungeonGuard.pathFollower) return;
-  if (!this.main_character) return;
-
-  const pf = this.dungeonGuard.pathFollower;
-  const path = pf.path;
-
-  if (!path || path.length < 2) return;
-
-  const toPlayer = this.main_character.position.clone().sub(this.dungeonGuard.position);
-  toPlayer.y = 0;
-  const playerDistance = toPlayer.length();
-
-  this.dungeonGuard.isChasing = playerDistance <= this.dungeonGuard.detectRadius;
-
-  let steering;
-
-  if (this.dungeonGuard.isChasing) {
-    steering = SteeringBehaviours.pursue(
-      this.dungeonGuard,
-      this.main_character,
-      this.dungeonGuard.lookAhead
-    );
-  } else {
-    steering = ReynoldsPathFollowing.followLoop(this.dungeonGuard);
-  }
-
-  steering.clampLength(0, this.dungeonGuard.maxForce);
-  this.dungeonGuard.applyForce(steering);
-
-  const dungeonAdapter = {
-    handleCollisions: (entity) => {
-      const fakeEntity = {
-        ...entity,
-        position: entity.position.clone().sub(this.dungeonOffset)
-      };
-
-      const corrected = this.dungeonMap.handleCollisions(fakeEntity);
-      
-      return corrected.add(this.dungeonOffset);
-    
-    }
-  };
-
-  this.dungeonGuard.update(dt, dungeonAdapter);
-  this.dungeonGuard.position.y = 1.0;
-  this.dungeonGuard.velocity.y = 0;
-  this.dungeonGuard.velocity.clampLength(0, this.dungeonGuard.topSpeed);
-
-  let facingDir = new THREE.Vector3();
-
-  if (this.dungeonGuard.isChasing) {
-    
-    facingDir = this.main_character.position.clone().sub(this.dungeonGuard.position);
-    facingDir.y = 0;
-  
-  } else {
-    
-    const a = path[pf.segmentIndex % path.length];
-    const b = path[(pf.segmentIndex + 1) % path.length];
-    const ab = b.clone().sub(a);
-    const abLenSq = ab.lengthSq();
-
-    if (abLenSq > 0) {
-      const ap = this.dungeonGuard.position.clone().sub(a);
-      let t = ap.dot(ab) / abLenSq;
-      t = THREE.MathUtils.clamp(t, 0, 1);
-
-      const closestPoint = a.clone().add(ab.clone().multiplyScalar(t));
-      const offsetFromPath = this.dungeonGuard.position.clone().sub(closestPoint);
-      offsetFromPath.y = 0;
-
-      const maxDrift = pf.pathRadius ?? 0.25;
-
-      if (offsetFromPath.length() > maxDrift) {
-        const correctedPos = closestPoint.clone();
-        correctedPos.y = 1.0;
-        this.dungeonGuard.position.lerp(correctedPos, 0.2);
-
-        this.dungeonGuard.velocity.multiplyScalar(0.5);
-        this.dungeonGuard.velocity.y = 0;
-        this.dungeonGuard.velocity.clampLength(0, this.dungeonGuard.topSpeed);
-      }
-    }
-
-    facingDir = b.clone().sub(a);
-    facingDir.y = 0;
-  }
-
-  if (facingDir.lengthSq() > 0.0001) {
-    facingDir.normalize();
-
-    const moveAngle = Math.atan2(facingDir.x, facingDir.z);
-    const facingOffset = this.dungeonGuard.modelFacingOffset ?? 0;
-    this.dungeonGuard.mesh.rotation.y = moveAngle + facingOffset;
-  }
-}
-
 // is player on safe tile in hallway 2 helper function
 /*
 *purpose: determine if the main character is currently standing on a safe tile (medium terrain) in maze 2, which would allow them to avoid detection by drones. 
@@ -1937,8 +1495,8 @@ reset() {
   }
 
   // Update main character movement and animation
-  this.updateMainCharacter(dt);
-  this.updateDungeonGuard(dt);
+  this.mainCharacterManager.updateMainCharacter(dt);
+  this.dungeonGuardManager.updateDungeonGuard(dt);
   // Update main character animation mixer if present
   if (this.mainCharacterMixer) {
     
@@ -1995,7 +1553,7 @@ reset() {
   }
 
   // Update camera to follow main character
-  this.updateCameraFollow();
+  this.mainCharacterManager.updateCameraFollow();
 
   // Final position logging (once per second)
   if (!this.finalLogCounter) this.finalLogCounter = 0;

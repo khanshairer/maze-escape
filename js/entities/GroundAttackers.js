@@ -51,7 +51,7 @@ export class GroundAttackers {
     const loader = new GLTFLoader();
 
     loader.load(
-      './public/sphere_robot/scene.gltf',
+      '/sphere_robot/scene.gltf',
       (gltf) => {
         const model = gltf.scene;
 
