@@ -2,6 +2,17 @@ import { Tile } from '../maps/Tile.js';
 import { Partition } from './Partition.js';
 import { Room } from './Room.js';
 
+/*
+
+Purpose: DungeonGenerator is a class responsible for generating a dungeon layout on a given map. 
+It uses a binary space partitioning (BSP) algorithm to divide the map into partitions, creates rooms within those partitions, and connects the rooms with corridors. The generated dungeon consists of walkable tiles (rooms and corridors) and obstacles (walls), which can be used for pathfinding and gameplay mechanics.
+
+Parameters: The class has a static method generate that takes a map object and an optional minimum room size as parameters. 
+The generate method fills the map with obstacles, creates partitions, generates rooms within those partitions, 
+and connects the rooms with corridors. It returns an object containing the root partition, the list of leaves (partitions), 
+the list of rooms, and the list of connections between rooms.  
+
+*/
 export class DungeonGenerator {
 
   static generate(map, minRoomSize = 4) {
@@ -37,14 +48,18 @@ export class DungeonGenerator {
   }
 
   static createRooms(partitions, map, minRoomSize) {
+    
     let rooms = [];
 
     for (let partition of partitions) {
+      
       let maxRoomWidth = partition.width - 2;
       let maxRoomHeight = partition.height - 2;
 
       if (maxRoomWidth < minRoomSize || maxRoomHeight < minRoomSize) {
+        
         continue;
+      
       }
 
       let roomWidth = randomInt(minRoomSize, maxRoomWidth);
@@ -64,9 +79,13 @@ export class DungeonGenerator {
       rooms.push(room);
 
       for (let r = room.y; r < room.y + room.height; r++) {
+        
         for (let c = room.x; c < room.x + room.width; c++) {
+          
           if (map.isInGrid(r, c)) {
+            
             map.grid[r][c].type = Tile.Type.EasyTerrain;
+          
           }
         }
       }
@@ -76,10 +95,13 @@ export class DungeonGenerator {
   }
 
   static createConnections(rooms) {
+    
     let connections = [];
 
     if (rooms.length <= 1) {
+      
       return connections;
+    
     }
 
     let connected = new Set();
@@ -88,19 +110,24 @@ export class DungeonGenerator {
     connected.add(rooms[0]);
 
     for (let i = 1; i < rooms.length; i++) {
+      
       remaining.add(rooms[i]);
+    
     }
 
     while (remaining.size > 0) {
+      
       let bestFrom = null;
       let bestTo = null;
       let bestDistance = Infinity;
 
       for (let from of connected) {
+        
         for (let to of remaining) {
           let dist = this.manhattanDistance(from.center(), to.center());
 
           if (dist < bestDistance) {
+            
             bestDistance = dist;
             bestFrom = from;
             bestTo = to;
@@ -109,6 +136,7 @@ export class DungeonGenerator {
       }
 
       if (bestFrom && bestTo) {
+        
         connections.push({ from: bestFrom, to: bestTo });
         connected.add(bestTo);
         remaining.delete(bestTo);
@@ -121,47 +149,64 @@ export class DungeonGenerator {
   }
 
   static carveCorridor(a, b, map) {
+    
     let centerA = a.center();
     let centerB = b.center();
 
     let horizontalFirst = Math.random() < 0.5;
 
     if (horizontalFirst) {
+      
       this.carveHorizontal(centerA.x, centerB.x, centerA.y, map);
       this.carveVertical(centerA.y, centerB.y, centerB.x, map);
+    
     } else {
+      
       this.carveVertical(centerA.y, centerB.y, centerA.x, map);
       this.carveHorizontal(centerA.x, centerB.x, centerB.y, map);
+    
     }
   }
 
   static carveHorizontal(x1, x2, y, map) {
+    
     let start = Math.min(x1, x2);
     let end = Math.max(x1, x2);
 
     for (let x = start; x <= end; x++) {
+      
       if (map.isInGrid(y, x)) {
+       
         map.grid[y][x].type = Tile.Type.EasyTerrain;
+      
       }
     }
   }
 
   static carveVertical(y1, y2, x, map) {
+    
     let start = Math.min(y1, y2);
     let end = Math.max(y1, y2);
 
     for (let y = start; y <= end; y++) {
+      
       if (map.isInGrid(y, x)) {
+        
         map.grid[y][x].type = Tile.Type.EasyTerrain;
+      
       }
     }
   }
 
   static manhattanDistance(a, b) {
+    
     return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+  
   }
 }
 
 function randomInt(min, max) {
+  
   return Math.floor(Math.random() * (max - min + 1)) + min;
+
 }
