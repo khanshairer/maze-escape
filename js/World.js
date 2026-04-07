@@ -5,7 +5,6 @@ import { TileMap } from './maps/TileMap.js'; // for creating and managing the ti
 import { Tile } from './maps/Tile.js'; // for representing individual tiles in the tile maps with properties like type and walkability
 import { TileMapRenderer } from './renderers/TileMapRenderer.js'; // for rendering the tile maps visually in the scene
 import { DynamicEntity } from './entities/DynamicEntity.js'; // for representing dynamic entities in the world
-import { DroneEnemy } from './entities/DroneEnemy.js'; // for representing flying drone enemies in the second maze that chase the player 
 import { EnergyCell } from './entities/EnergyCell.js'; // creating main goal objects in the world
 import { GLTFLoader } from 'three/examples/jsm/Addons.js'; // for loading 3D models in GLTF format for the main character and other entities
 import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js'; // for implementing vector path finding..
@@ -15,6 +14,8 @@ import { DungeonGenerator } from './pcg/DungeonGenerator.js'; // for procedurall
 import { JPS } from './ai/pathfinding/JPS.js'; // importing jumppointsearch functionality 
 import { ReynoldsPathFollowing } from './ai/steering/ReynoldsPathFollowing.js'; //implements reynolds path following...
 import { SteeringBehaviours } from './ai/steering/SteeringBehaviours.js'; // for puruse 
+import { GroundAttackers } from './entities/GroundAttackers.js';
+import { DroneEntity } from './entities/DroneEntity.js';
 
 /**
  * World class holds all information about our game's world
@@ -30,8 +31,9 @@ export class World {
     this.clock = new THREE.Clock();
     this.inputHandler = new InputHandler(this.camera);
     this.entities = [];
-
+ 
     // added ................
+    this.droneRespawnDelay = 1.0;
     this.goals = []; // store goals entities for easy access
     this.npcs = []; // store npc entities for easy access
     this.mixers = []; // store animation mixers for updating in the main loop ..for animation purposes
@@ -247,7 +249,8 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
   });
 
   // crreate 10 ground attackers
-  this.createGroundAttackers(10);
+  this.groundAttackerManager = new GroundAttackers(this);
+  this.groundAttackerManager.create(10); // create 10 ground attackers in maze 1 to chase the player and create dynamic and challenging gameplay as they respawn after reaching the door goal to keep up the pressure on the player and make maze 1 more engaging
 
   // vector pathfinding 
   this.groundVectorPathFinding = new VectorPathFinding(
@@ -319,8 +322,11 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
 
   //this.createGoals(5);
   this.createLoadingIndicator();
-  this.createGameplayDrones(3);
-  //this.createNPCs(10);
+  
+  // Drone manager
+  this.droneManager = new DroneEntity(this);
+  this.droneManager.create(3); // create 10 drones in maze 2 to chase the player and create dynamic and challenging gameplay as they navigate through the larger and more complex maze 2, while also showcasing the hierarchical pathfinding with a cluster size of 5 for good performance and still intelligent movement from the drones as they pursue the player through maze 2
+  
   this.createPatrolLoopInDungeon3();
   this.drawDungeon3PatrolLoop();
   this.createDungeonGuard();
@@ -994,380 +1000,6 @@ Purpose: updateLoadingIndicator is a method that updates the loading indicator d
 }
 
 
-/*
-Purpose: createGameplayDrones is a method that generates a specified number of drone enemy entities in the second maze (map2) of the game world.
-Parameters:- numDrones: the number of drone enemies to create in the second maze. The method ensures that each drone is spawned at a valid location that is not too close 
-to other drones,
-*/
-createGameplayDrones(numDrones = 3) {
-  
-  this.drones = [];
-  this.modelsLoading += numDrones;
-
-  for (let i = 0; i < numDrones; i++) {
-    
-    const droneTile = this.getValidDroneSpawnTile(this.map2, this.drones);
-    const dronePosition = this.map2.localize(droneTile).clone().add(this.map2Offset);
-
-    const drone = new DroneEnemy({
-      spawnTile: droneTile,
-      homeTile: droneTile,
-      patrolMap: this.map2,
-      position: dronePosition.clone(),
-      velocity: new THREE.Vector3(0, 0, 0),
-      color: 0xffaa33,
-      scale: new THREE.Vector3(1, 1, 1),
-      topSpeed: 3.5
-    });
-
-    drone.position.y = 1;
-    drone.mesh.rotation.y = Math.random() * Math.PI * 2;
-
-    drone.initializeFSM({
-      player: this.main_character,
-      world: this
-    });
-
-    drone.setPathfinder(this.droneHierarchicalPathfinder);
-
-    this.loadDroneVisual(drone);
-    this.addDroneDetectionCircle(drone);
-
-    this.drones.push(drone);
-    this.addEntityToWorld(drone);
-  }
-}
-
-
-/*
-Purpose: getValidDroneSpawnTile is a method that attempts to find a valid tile for spawning a drone enemy in the second maze (map2) of the game world. 
-It randomly selects walkable tiles and checks if they are at least 5 units away from any existing drones to prevent overcrowding and ensure better gameplay balance.
-parameters:- map: the tile map (map2) in which to find a valid spawn tile for the drone.
-- existingDrones: an array of existing drone entities that have already been spawned in the maze, used to check for proximity and ensure new drones do not spawn too close to them. 
-*/
-getValidDroneSpawnTile(map, existingDrones = []) {
-  
-  let spawnTile;
-  let spawnPosition;
-  let tries = 0;
-
-  do {
-    spawnTile = map.getRandomWalkableTile();
-    spawnPosition = map.localize(spawnTile);
-    tries++;
-  } while (
-    tries < 300 &&
-    (
-      existingDrones.some((drone) => {
-        const droneLocalPos = drone.position.clone().sub(this.map2Offset);
-        return droneLocalPos.distanceTo(spawnPosition) < 5;
-      })
-    )
-  );
-
-  return spawnTile;
-}
-
-/*
-Purpose: loadDroneVisual is a method that takes a drone enemy entity as a parameter and loads its 3D model asynchronously using GLTFLoader. 
-Once the model is loaded, it applies the model to the drone's mesh and sets up any animations if they are present in the GLTF file. 
-
-Parameters:- drone: the drone enemy entity for which the visual model is being loaded. The method also handles loading errors by setting a flag on the drone.
-*/
-loadDroneVisual(drone) {
-  
-  const loader = new GLTFLoader();
-
-  loader.load(
-    '/animated_drone/scene.gltf',
-    (gltf) => {
-      drone.applyDroneModel(gltf, this.mixers);
-
-      // attach detection circle AFTER model is applied
-      if (drone._pendingDetectionCircle) {
-        drone.mesh.add(drone._pendingDetectionCircle);
-        drone.detectionCircle = drone._pendingDetectionCircle;
-        drone._pendingDetectionCircle = null;
-      }
-
-      this.modelsLoaded++;
-      this.updateLoadingIndicator();
-    },
-    undefined,
-    () => {
-      drone.handleLoadError();
-
-      // still attach circle even if model fails
-      if (drone._pendingDetectionCircle) {
-        drone.mesh.add(drone._pendingDetectionCircle);
-        drone.detectionCircle = drone._pendingDetectionCircle;
-        drone._pendingDetectionCircle = null;
-      }
-
-      this.modelsLoaded++;
-      this.updateLoadingIndicator();
-    }
-  );
-}
-
-/*
-Purpose: addDroneDetectionCircle is a method that creates a circular mesh to visually represent the detection range of a drone enemy in the game world.
-parameters:- drone: the drone enemy entity for which the detection circle is being created. The method calculates the radius of the circle based on the drone's detectRange
-*/
-addDroneDetectionCircle(drone) {
-  
-  const radius = drone.detectRange ?? drone.detectionRange ?? 6;
-  const geometry = new THREE.CircleGeometry(radius, 64);
-
-  const material = new THREE.MeshBasicMaterial({
-    color: 0x66e0ff,      // bluish default
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.25,        
-    depthWrite: false
-  });
-
-  const circle = new THREE.Mesh(geometry, material);
-  circle.rotation.x = -Math.PI / 2;
-  circle.position.y = 0.05;
-  circle.renderOrder = 999;
-
-  drone._pendingDetectionCircle = circle;
-}
-
-  // create 10 ground attackers in the first maze (for vector pathfinding testing)
-  /*
-  purpose: createGroundAttackers is a method that generates a specified number of ground attacker entities in the first maze of the game world. 
-  Each attacker is represented by a 3D model of a sphere robot, which is loaded asynchronously using GLTFLoader. The attackers are placed at random walkable tiles in the maze, 
-  with checks to ensure they are not too close to the player start position, the door goal, or each other to prevent overcrowding and ensure a more balanced gameplay experience. 
-  Each attacker has properties to track whether their model has loaded successfully and to handle any loading errors, as well as an animation mixer if the model includes animations. This method also updates a loading indicator to show overall progress of attacker model loading.
-  
-  parameters:
-- numAttackers: the number of ground attackers to create (default is 10)
-  */
-  createGroundAttackers(numAttackers = 10) {
-  this.ground_attackers = [];
-  this.modelsLoading += numAttackers;
-
-  for (let i = 0; i < numAttackers; i++) {
-    
-    let attackerTile;
-    let attackerPosition;
-    let tries = 0;
-
-    do {
-      attackerTile = this.map.getRandomWalkableTile();
-      attackerPosition = this.map.localize(attackerTile);
-      tries++;
-    } while (
-      tries < 300 &&
-      (
-        attackerPosition.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
-        attackerPosition.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
-        this.ground_attackers.some(a => a.position.distanceTo(attackerPosition) < 5)
-      )
-    );
-
-    let attacker = new DynamicEntity({
-      position: attackerPosition.clone(),
-      velocity: new THREE.Vector3(0, 0, 0),
-      color: 0x660000,
-      scale: new THREE.Vector3(1, 0.75, 1)
-    });
-
-    attacker.boatLoaded = false;
-    attacker.position.y = 1;
-    attacker.modelFacingOffset = 0;
-
-    const loader = new GLTFLoader();
-    loader.load(
-      '/sphere_robot/scene.gltf',
-      (gltf) => {
-        const model = gltf.scene;
-
-        while (attacker.mesh.children.length > 0) {
-          attacker.mesh.remove(attacker.mesh.children[0]);
-        }
-
-        model.scale.set(2.2, 2.2, 2.2);
-
-        const box = new THREE.Box3().setFromObject(model);
-        model.position.y = -box.min.y;
-        model.rotation.y = 0;
-
-        attacker.mesh.add(model);
-        attacker.robotModel = model;
-        attacker.boatLoaded = true;
-
-        if (gltf.animations && gltf.animations.length > 0) {
-          
-          const mixer = new THREE.AnimationMixer(model);
-          const action = mixer.clipAction(gltf.animations[0]);
-          action.play();
-          attacker.mixer = mixer;
-          this.mixers.push(mixer);
-        
-        }
-
-        this.modelsLoaded++;
-        this.updateLoadingIndicator();
-      },
-      undefined,
-      (error) => {
-        attacker.boatLoaded = true;
-        attacker.loadError = true;
-        this.modelsLoaded++;
-        this.updateLoadingIndicator();
-      }
-    );
-
-    this.ground_attackers.push(attacker);
-    this.addEntityToWorld(attacker);
-  }
-}
-
-  // create npcs with visual loading feedback
-  /*
-  purpose: createNPCs is a method that generates a specified number of NPC entities in the game world, 
-  each with visual feedback to indicate that their boat model is loading. 
-
-parameters:
-- numNPCs: the number of NPCs to create (default is 10)
-Each NPC is initially represented by a temporary orange cube with a spinning yellow cone above it to indicate loading. Once the boat model is successfully loaded, 
-the temporary visuals are removed and replaced with the actual boat model. 
-If there is an error during loading, the cube turns red to indicate the failure. This method also updates a loading indicator to show overall progress of NPC model loading.
-  */
-  createNPCs(numNPCs = 10) {
-    
-    this.modelsLoading += numNPCs;
-
-    for (let i = 0; i < numNPCs; i++) {
-      
-      let randomTile =
-        this.map.walkableTiles[
-          Math.floor(Math.random() * this.map.walkableTiles.length)
-        ];
-      
-        let position = this.map.localize(randomTile);
-
-      // Create NPC entity with a temporary loading cube
-      let npc = new DynamicEntity({
-        position: position,
-        velocity: new THREE.Vector3(0, 0, 0),
-        color: 0xffaa33, // Orange color for loading
-        scale: new THREE.Vector3(1, 1, 1)
-      });
-
-      // Set initial rotation to face a random direction
-      npc.mesh.rotation.y = Math.random() * Math.PI * 2;
-
-      // Add a flag to indicate if boat is loaded
-      npc.boatLoaded = false;
-
-      // Add a temporary cube that shows it's loading
-      const tempGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-      const tempMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffaa33,
-        emissive: 0x442200,
-        transparent: true,
-        opacity: 0.7
-      });
-      
-      const tempCube = new THREE.Mesh(tempGeometry, tempMaterial);
-      tempCube.position.set(0, 0.75, 0);
-      npc.mesh.add(tempCube);
-
-      // Add a spinning indicator
-      const indicatorGeo = new THREE.ConeGeometry(0.3, 0.8, 8);
-      const indicatorMat = new THREE.MeshStandardMaterial({
-        color: 0xffff00
-      });
-      
-      const indicator = new THREE.Mesh(indicatorGeo, indicatorMat);
-      indicator.position.set(0, 1.8, 0);
-      indicator.userData = { spinSpeed: 0.1 };
-      npc.mesh.add(indicator);
-      npc.loadingIndicator = indicator;
-
-      // Load boat model
-      const loader = new GLTFLoader();
-      loader.load(
-        '/animated_drone/scene.gltf',
-        (gltf) => {
-          const model = gltf.scene;
-          console.log('Boat model loaded:', gltf.scene);
-
-          const currentRotation = npc.mesh.rotation.y;
-
-          // Remove temporary loading visuals
-          while (npc.mesh.children.length > 0) {
-            npc.mesh.remove(npc.mesh.children[0]);
-          }
-
-          // Scale and position the boat
-          model.scale.set(10, 10, 10);
-          model.position.set(0, -0.5, 0);
-
-          // Center the boat on ground
-          const box = new THREE.Box3().setFromObject(model);
-          model.position.y = -box.min.y;
-
-          model.userData.forwardAxis = 'x';
-
-          // Add the boat model WITHOUT rotating it first
-          npc.mesh.add(model);
-
-          // Store reference to the boat model for rotation calculations
-          npc.boatModel = model;
-
-          // Mark boat as loaded
-          npc.boatLoaded = true;
-
-          // Update color to final color
-          npc.color = 0xff3333;
-
-          // Restore the rotation we had
-          npc.mesh.rotation.y = currentRotation;
-
-          // Handle animations
-          if (gltf.animations && gltf.animations.length > 0) {
-            const mixer = new THREE.AnimationMixer(model);
-            const action = mixer.clipAction(gltf.animations[0]);
-            action.play();
-            npc.mixer = mixer;
-            this.mixers.push(mixer);
-          }
-
-          // Track loading progress
-          this.modelsLoaded++;
-
-          // Update loading indicator
-          this.updateLoadingIndicator();
-        },
-        (progress) => {
-          // Optional: show per-NPC progress
-        },
-        (error) => {
-          // Make the loading cube red to show error
-          if (npc.mesh.children[0]) {
-            npc.mesh.children[0].material.color.setHex(0xff0000);
-          }
-
-          // Mark as loaded (with error) so it can be considered for movement if needed
-          npc.boatLoaded = true;
-          npc.loadError = true;
-
-          this.modelsLoaded++;
-          this.updateLoadingIndicator();
-        }
-      );
-
-      this.npcs.push(npc);
-      this.addEntityToWorld(npc);
-    }
-  }
-
-
   // create energy cells in the first maze
   createEnergyCells(numCells = 5) {
     
@@ -1523,93 +1155,8 @@ If there is an error during loading, the cube turns red to indicate the failure.
   
   }
 
-  // ----- Movement and animation methods (steering based) -----
-  /*
-  purpose: when a ground attacker is "defeated", respawn it at a valid location in the first maze after a cooldown. 
-  This involves finding a new spawn tile that is not too close to the player, the door goal, or other attackers, and resetting the attacker's position and state.
   
-  approach: use getRandomWalkableTile to find a new spawn location in the first maze that is not too close to the player, door goal, or other attackers, 
-  then reset the attacker's position, velocity, and acceleration.
-  
-  */
-  respawnGroundAttacker(npc) {
-  
-    let spawnTile;
-    let spawnPos;
-    let tries = 0;
-
-    do {
-      spawnTile = this.map.getRandomWalkableTile();
-      spawnPos = this.map.localize(spawnTile);
-      tries++;
-    } while (
-      tries < 300 &&
-      (
-      
-        spawnPos.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
-        spawnPos.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
-        this.ground_attackers.some(a =>
-        a !== npc && a.position.distanceTo(spawnPos) < 5
-      )
-    )
-  );
-
-  npc.position.copy(spawnPos);
-  npc.position.y = 1;
-
-  npc.velocity.set(0, 0, 0);
-  if (npc.acceleration) npc.acceleration.set(0, 0, 0);
-}
-
-  
- /*
- purpose: when a drone is "defeated", respawn it at a valid location in maze 2 after a cooldown. This involves finding a new spawn tile that is not too close to other drones, 
- and resetting the drone's position and state.
- 
-  approach: use getValidDroneSpawnTile to find a new spawn location in maze 2 that is not too close to existing drones, then reset the drone's position, 
-  spawn tile, home tile, and patrol map.
-  
-  */
-  respawnDrone(npc) {
-  
-    const spawnTile = this.getValidDroneSpawnTile(
-    this.map2,
-    this.drones.filter((drone) => drone !== npc)
-  
-  );
-
-  const spawnPos = this.map2.localize(spawnTile).clone().add(this.map2Offset);
-  npc.spawnTile = spawnTile;
-  npc.homeTile = spawnTile;
-  npc.patrolMap = this.map2;
-  npc.resetToSpawn(spawnPos);
-}
-
- 
-/*
-purpose: when a drone is "defeated", start a respawn cooldown by hiding it and resetting its position, then after the cooldown it will be respawned at a valid location 
-in maze 2. This gives a visual feedback of defeat and prevents immediate respawn on top of the player.
-
-approach: set a respawn timer on the npc, reset its velocity and acceleration, hide its mesh, and move it below the ground. The main update loop will check the respawn timer
- and call respawnDrone when it reaches 0.
-
- npc -> null
-*/
-  startDroneRespawnCooldown(npc) {
-    
-    npc.respawnTimer = this.groundAttackerRespawnDelay;
-    npc.velocity.set(0, 0, 0);
-    
-    if (npc.acceleration) {
-      npc.acceleration.set(0, 0, 0);
-    }
-
-    npc.mesh.visible = false;
-    npc.position.y = -100;
-  
-  }
-
-  // Update main character movement using steering behaviours
+// Update main character movement using steering behaviours
   /*
 *purpose: compute a steering force based on player input to move the main character, and handle jumping physics. Also switch between idle and walk animations based on movement.
 
@@ -1904,142 +1451,9 @@ snapEntityToWalkableTile(entity) {
   }
 }
 
-// add wander behaviour for ground attacker
 
-/*
-*purpose: update the position of ground attackers by keeping them on the ground, preventing them from escaping to maze 2, and 
-adding simple wander/chase/avoid behaviours based on the player's position
 
-*approach: for each ground attacker, first clamp their y position to keep them on the ground. Then check if they have reached the door goal tile - if so, respawn them. 
-Next, run the vector field pathfinding to update their path to the door goal. Finally, clamp their position within the bounds of maze 1 and 
-snap them to walkable tiles to prevent them from escaping into maze 2.
 
-*@returns null
-*/
-updateGroundAttackers() {
-  
-  if (!this.ground_attackers || this.ground_attackers.length === 0) return;
-  
-  if (!this.doorGoal || !this.groundVectorPathFinding) return;
-
-  for (let npc of this.ground_attackers) {
-    
-    npc.position.y = 1;
-    if (npc.velocity) npc.velocity.y = 0;
-    
-    if (npc.acceleration) npc.acceleration.y = 0;
-
-    const currentTile = this.map.quantize(npc.position);
-
-    // respawn as soon as attacker reaches the goal tile
-    if (
-      currentTile &&
-      currentTile.row === this.doorGoal.row &&
-      currentTile.col === this.doorGoal.col
-    ) {
-      this.respawnGroundAttacker(npc);
-      continue;
-    }
-  }
-
-  this.groundVectorPathFinding.runVectorFieldPathFinding(this.doorGoal);
-
-  const minX = this.map.minX + 1;
-  const maxX = this.map.minX + this.map.cols * this.map.tileSize - 1;
-  const minZ = this.map.minZ + 1;
-  const maxZ = this.map.minZ + this.map.rows * this.map.tileSize - 1;
-
-  for (let npc of this.ground_attackers) {
-    
-    npc.position.x = THREE.MathUtils.clamp(npc.position.x, minX, maxX);
-    npc.position.z = THREE.MathUtils.clamp(npc.position.z, minZ, maxZ);
-    this.snapEntityToWalkableTile(npc);
-    npc.position.y = 1;
-  
-  }
-}
-
-// Update FSM-driven drone gameplay behaviour.
-/*
-*purpose: update the position and state of drones in the world
-*approach: for each drone, update its position and state based on the finite state machine, and clamp its position within the bounds of maze 2
-*@param {number} dt - the time step for the update
-*@returns null
-*/
-updateDrones(dt) {
-  
-  if (!this.drones || this.drones.length === 0) return;
-
-  for (let drone of this.drones) {
-    
-    if (drone.respawnTimer > 0) {
-      
-      drone.respawnTimer -= dt;
-
-      if (drone.respawnTimer <= 0) {
-        
-        this.respawnDrone(drone);
-      
-      }
-
-      continue;
-    }
-
-    drone.position.y = 1;
-    
-    if (drone.velocity) drone.velocity.y = 0;
-    
-    if (drone.acceleration) drone.acceleration.y = 0;
-
-    drone.updateFSM(dt, {
-      player: this.main_character,
-      world: this
-    });
-  }
-
-  const minX = this.map2Offset.x + this.map2.minX + 1;
-  const maxX = this.map2Offset.x + this.map2.minX + this.map2.cols * this.map2.tileSize - 1;
-  const minZ = this.map2.minZ + 1;
-  const maxZ = this.map2.minZ + this.map2.rows * this.map2.tileSize - 1;
-
-  for (let drone of this.drones) {
-    
-    if (drone.respawnTimer > 0) continue;
-
-    drone.position.x = THREE.MathUtils.clamp(drone.position.x, minX, maxX);
-    drone.position.z = THREE.MathUtils.clamp(drone.position.z, minZ, maxZ);
-
-    let localPos = drone.position.clone().sub(this.map2Offset);
-    let tile = this.map2.quantize(localPos);
-
-    if (!tile || !tile.isWalkable()) {
-      let bestTile = null;
-      let bestDist = Infinity;
-
-      for (let walkable of this.map2.walkableTiles) {
-        let safePos = this.map2.localize(walkable).clone().add(this.map2Offset);
-        let dist = safePos.distanceTo(drone.position);
-
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestTile = walkable;
-        }
-      }
-
-      if (bestTile) {
-        let correctedPos = this.map2.localize(bestTile).clone().add(this.map2Offset);
-        drone.position.x = correctedPos.x;
-        drone.position.z = correctedPos.z;
-        drone.velocity.set(0, 0, 0);
-        
-        if (drone.acceleration) drone.acceleration.set(0, 0, 0);
-      
-      }
-    }
-
-    drone.position.y = 1;
-  }
-}
 
 // helper function to create partol loop 
 /*
@@ -2540,8 +1954,9 @@ reset() {
   }
 
   //updateGroundAttacker with new steering behaviours
-  this.updateGroundAttackers();
-  this.updateDrones(dt);
+  this.groundAttackerManager.update();
+  this.droneManager.update(dt);
+  
 
   // Update all entities (this includes the main character)
   for (let e of this.entities) {
