@@ -1,3 +1,5 @@
+import { MinHeap } from './util/MinHeap.js';
+
 export class JPS {
   constructor(map) {
     this.map = map;
@@ -132,6 +134,7 @@ export class JPS {
       return nextTile;
     }
 
+    // Vertical-first bias, matching the lecture-style 4-direction version
     if (dr !== 0) {
       if (
         this.jump(nextTile, 0, -1, goal) ||
@@ -209,25 +212,22 @@ export class JPS {
       return [];
     }
 
-    const openSet = [start];
-    const openKeys = new Set([this.key(start)]);
+    const openSet = new MinHeap();
     const closed = new Set();
 
     const cameFrom = new Map();
     const gScore = new Map();
     const fScore = new Map();
 
-    gScore.set(this.key(start), 0);
-    fScore.set(this.key(start), this.heuristic(start, goal));
+    const startKey = this.key(start);
+    gScore.set(startKey, 0);
+    fScore.set(startKey, this.heuristic(start, goal));
 
-    while (openSet.length > 0) {
-      openSet.sort((a, b) => {
-        return (fScore.get(this.key(a)) ?? Infinity) - (fScore.get(this.key(b)) ?? Infinity);
-      });
+    openSet.enqueue(start, fScore.get(startKey));
 
-      const current = openSet.shift();
+    while (!openSet.isEmpty()) {
+      const current = openSet.dequeue();
       const currentKey = this.key(current);
-      openKeys.delete(currentKey);
 
       if (closed.has(currentKey)) {
         continue;
@@ -255,15 +255,11 @@ export class JPS {
         if (tentativeG < (gScore.get(successorKey) ?? Infinity)) {
           cameFrom.set(successorKey, current);
           gScore.set(successorKey, tentativeG);
-          fScore.set(
-            successorKey,
-            tentativeG + this.heuristic(successor, goal)
-          );
 
-          if (!openKeys.has(successorKey)) {
-            openSet.push(successor);
-            openKeys.add(successorKey);
-          }
+          const successorF = tentativeG + this.heuristic(successor, goal);
+          fScore.set(successorKey, successorF);
+
+          openSet.enqueue(successor, successorF);
         }
       }
     }
