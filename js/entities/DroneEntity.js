@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { DroneEnemy } from './DroneEnemy.js';
+import { CollisionAvoidSteering } from '../ai/steering/CollisionAvoidSteering.js';
 
 export class DroneEntity {
   constructor(world) {
@@ -31,7 +32,7 @@ export class DroneEntity {
         velocity: new THREE.Vector3(0, 0, 0),
         color: 0xffaa33,
         scale: new THREE.Vector3(1, 1, 1),
-        topSpeed: 3.5
+        topSpeed: 5.5
       });
 
       drone.position.y = 1;
@@ -174,6 +175,50 @@ export class DroneEntity {
     npc.position.y = -100;
   }
 
+  droneAvoidanceSteer(drone) {
+  let steer = new THREE.Vector3();
+
+  const localDrone = {
+    ...drone,
+    position: drone.position.clone().sub(this.world.map2Offset)
+  };
+
+  // Keep tile wall avoidance
+  steer.add(
+    CollisionAvoidSteering.tileWalls(localDrone, this.world.map2, 1.2, 0.9)
+  );
+
+  // Keep outer map containment if you still want it
+  steer.add(
+    CollisionAvoidSteering.bounds(localDrone, this.world.map2, 1.8, 1.2)
+  );
+
+  // Circular separation based on tracking radius
+  for (let other of this.world.drones) {
+    if (!other || other === drone || other.respawnTimer > 0) continue;
+
+    const otherTrackRadius =
+      other.detectRange ?? other.detectionRange ?? 6;
+
+    const localOther = {
+      position: other.position.clone().sub(this.world.map2Offset),
+      radius: otherTrackRadius * 0.9
+    };
+
+    const avoid = CollisionAvoidSteering.round(
+      localDrone,
+      localOther,
+      1.4,
+      2.5,
+      this.world.debugVisuals
+    );
+
+    steer.add(avoid);
+  }
+
+  return steer;
+}
+
   update(dt) {
     if (!this.world.drones || this.world.drones.length === 0) return;
 
@@ -195,13 +240,16 @@ export class DroneEntity {
       if (drone.velocity) drone.velocity.y = 0;
       if (drone.acceleration) drone.acceleration.y = 0;
 
-      // THIS is the missing FSM call from your old code
       if (typeof drone.updateFSM === 'function') {
         drone.updateFSM(dt, {
           player: this.world.main_character,
           world: this.world
         });
       }
+
+      const avoidSteer = this.droneAvoidanceSteer(drone);
+      avoidSteer.clampLength(0, 6.0);
+      drone.applyForce(avoidSteer);
     }
 
     const minX = this.world.map2Offset.x + this.world.map2.minX + 1;

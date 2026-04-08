@@ -1,11 +1,9 @@
 import * as THREE from 'three'; // for general 3D rendering and math utilities
 import * as Setup from './setup.js'; // for setting up the scene, camera, renderer, and lighting
 import { InputHandler } from './input/InputHandler.js'; // for handling player input(main character movement) and interactions with the world
+import { Tile } from './maps/Tile.js'; // for representing individual tiles in the tile maps for the mazes and dungeon
 import { TileMap } from './maps/TileMap.js'; // for creating and managing the tile-based maps for the mazes and dungeon 
-import { Tile } from './maps/Tile.js'; // for representing individual tiles in the tile maps with properties like type and walkability
 import { TileMapRenderer } from './renderers/TileMapRenderer.js'; // for rendering the tile maps visually in the scene
-import { DynamicEntity } from './entities/DynamicEntity.js'; // for representing dynamic entities in the world
-import { GLTFLoader } from 'three/examples/jsm/Addons.js'; // for loading 3D models in GLTF format for the main character and other entities
 import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js'; // for implementing vector path finding..
 import { HierarchicalAStar } from './ai/pathfinding/HierarchicalAStar.js'; // for implementing hierarchical pathfinding for drones in maze 2
 import { DebugVisuals } from './debug/DebugVisuals.js'; // for deugging purposes..
@@ -16,6 +14,8 @@ import { DungeonGuard } from './entities/DungeonGuard.js';
 import { MainCharacter } from './entities/MainCharacter.js';
 import { EnergyCellManager } from './gameLogic/EnergyCellManager.js';
 import { ControllerExitManager } from './gameLogic/ControllerExitManager.js';
+import { WorldLayoutManager } from './gameLogic/WorldLayoutManager.js';
+
 
 /**
  * World class holds all information about our game's world
@@ -61,7 +61,7 @@ export class World {
     this.currentMainAction = null;    // currently playing action
 
     // Movement speed (units per second)
-    this.moveSpeed = 5.0; // Adjust as needed for gameplay feel
+    this.moveSpeed = 7.0; // Adjust as needed for gameplay feel
     // Steering force limit
     this.maxForce = 10.0; // Adjust as needed for responsive steering behavior
 
@@ -99,6 +99,9 @@ export class World {
   this.modelsLoaded = 0;
   this.modelsLoading = 0;
 
+  // world layout manager to handle the creation of the mazes, dungeon, and hallway connections between them with proper alignment and walkable paths for the player to navigate through the world and reach the controller exit in the dungeon after collecting enough energy cells
+  this.worldLayoutManager = new WorldLayoutManager(this);
+  
   // ----- create two mazes -----
   this.map = new TileMap(2); // maze 1 is generated with algorithm 2 for more complexity and longer paths
   this.map2 = new TileMap(2); // maze 2 is also generated with algorithm 2 for more complexity and longer paths
@@ -121,19 +124,19 @@ export class World {
 
   // ----- create hallway connection between mazes -----
   let preferredRow = Math.floor(this.map.rows / 2);
-  let row1 = this.findClosestWalkableRow(this.map, preferredRow, 'right');
-  let row2 = this.findClosestWalkableRow(this.map2, preferredRow, 'left');
+  let row1 = this.worldLayoutManager.findClosestWalkableRow(this.map, preferredRow, 'right');
+  let row2 = this.worldLayoutManager.findClosestWalkableRow(this.map2, preferredRow, 'left');
 
   this.connectionRow = row1;
   if (this.map2.grid[this.connectionRow] && this.map2.grid[this.connectionRow][1].isWalkable()) {
     row2 = this.connectionRow;
   } else {
     this.connectionRow = row2;
-    row1 = this.findClosestWalkableRow(this.map, this.connectionRow, 'right');
+    row1 = this.worldLayoutManager.findClosestWalkableRow(this.map, this.connectionRow, 'right');
   }
 
-  this.openMazeSide(this.map, row1, 'right');
-  this.openMazeSide(this.map2, row2, 'left');
+  this.worldLayoutManager.openMazeSide(this.map, row1, 'right');
+  this.worldLayoutManager.openMazeSide(this.map2, row2, 'left');
 
   // ================================
   // THIRD DUNGEON with 4 rooms 
@@ -149,8 +152,8 @@ export class World {
   );
 
   // ----- create hallway connection between map 2 and dungeon -----
-  let rowMap2ToDungeon = this.findClosestWalkableRow(this.map2, preferredRow, 'right');
-  let row3 = this.findClosestWalkableRow(this.dungeonMap, preferredRow, 'left');
+  let rowMap2ToDungeon = this.worldLayoutManager.findClosestWalkableRow(this.map2, preferredRow, 'right');
+  let row3 = this.worldLayoutManager.findClosestWalkableRow(this.dungeonMap, preferredRow, 'left');
 
   this.connectionRow2 = rowMap2ToDungeon;
 
@@ -162,16 +165,16 @@ export class World {
     row3 = this.connectionRow2;
   } else {
     this.connectionRow2 = row3;
-    rowMap2ToDungeon = this.findClosestWalkableRow(this.map2, this.connectionRow2, 'right');
+    rowMap2ToDungeon = this.worldLayoutManager.findClosestWalkableRow(this.map2, this.connectionRow2, 'right');
   }
   
   // open the sides of the mazes to create doorways for the hallways between map 1 and map 2, and between map 2 and the dungeon
-  this.openMazeSide(this.map2, rowMap2ToDungeon, 'right');
-  this.openMazeSide(this.dungeonMap, row3, 'left');
+  this.worldLayoutManager.openMazeSide(this.map2, rowMap2ToDungeon, 'right');
+  this.worldLayoutManager.openMazeSide(this.dungeonMap, row3, 'left');
 
   // ONLY connect the dungeon door into the dungeon interior
   // do NOT carve through map2, that breaks maze2 movement
-  this.connectSideToInterior(this.dungeonMap, row3, 'left');
+  this.worldLayoutManager.connectSideToInterior(this.dungeonMap, row3, 'left');
 
   this.map.walkableTiles = this.map.grid.flat().filter(tile => tile.isWalkable());
   this.map2.walkableTiles = this.map2.grid.flat().filter(tile => tile.isWalkable());
@@ -183,7 +186,7 @@ export class World {
 
 
 // ADD EXTRA GREEN (SAFE) TILES IN MAP 2 for lowering the difficulites in maze 2 
-this.addExtraGreenTiles(this.map2, 8); // 8 tiles
+this.worldLayoutManager.addExtraGreenTiles(this.map2, 8); // 8 tiles
 
   // ----- render first maze in the scene -----
   this.mazeGroup1 = new THREE.Group();
@@ -223,13 +226,13 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
 
 
   // ----- render hallway between map 1 and map 2 -----
-  this.createHallway(row1, row2);
+  this.worldLayoutManager.createHallway(row1, row2);
 
   // ----- render hallway between map 2 and dungeon -----
-  this.createHallwayBetweenMap2AndDungeon(rowMap2ToDungeon, row3);
+  this.worldLayoutManager.createHallwayBetweenMap2AndDungeon(rowMap2ToDungeon, row3);
 
   this.dungeonEntryTile = this.dungeonMap.grid[row3][0];
-  this.controllerExitTile = this.findFarthestWalkableTile(
+  this.controllerExitTile = this.worldLayoutManager.findFarthestWalkableTile(
     this.dungeonMap,
     this.dungeonEntryTile
   );
@@ -247,7 +250,7 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
 
   // crreate 10 ground attackers
   this.groundAttackerManager = new GroundAttackers(this);
-  this.groundAttackerManager.create(10); // create 10 ground attackers in maze 1 to chase the player and create dynamic and challenging gameplay as they respawn after reaching the door goal to keep up the pressure on the player and make maze 1 more engaging
+  this.groundAttackerManager.create(7); // create 10 ground attackers in maze 1 to chase the player and create dynamic and challenging gameplay as they respawn after reaching the door goal to keep up the pressure on the player and make maze 1 more engaging
 
   // vector pathfinding 
   this.groundVectorPathFinding = new VectorPathFinding(
@@ -283,249 +286,11 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
   this.energyCellManager = new EnergyCellManager(this);
   this.energyCellManager.createEnergyCells(3);
 
-//this.createGoalsForMap(this.map2, this.map2Offset, 5);
-//this.createNPCsForMap(this.map2, this.map2Offset, 10);
-this.energyCellManager.createEnergyCellsForMap(this.map2, this.map2Offset, 3);
-this.energyCellManager.createEnergyCellsForMap(this.dungeonMap, this.dungeonOffset, 3);
-this.controllerExitManager.updateEnergyUnlockRequirement();
-}
-
- 
-/*  
-Purpose : findFarthestWalkableTile is a method that takes in a tile map and a starting tile, and iterates through all the walkable tiles in the map 
-to find the one that is farthest away from the starting tile based on Manhattan distance. This is used to place the controller exit in the dungeon as far away from the 
-entry point as possible to create a more challenging and engaging gameplay experience for the player as they have to navigate through the dungeon to reach the exit 
-after unlocking it by collecting energy cells. If no valid starting tile is provided,it will return a random walkable tile from the map as a fallback.
-
-returns the tile that is farthest away from the starting tile based on Manhattan distance, or a random walkable tile if no valid starting tile is provided.
-*/
-findFarthestWalkableTile (map, fromTile) {
-
-    if (!fromTile || !fromTile.isWalkable()) {
-      return map.getRandomWalkableTile();
-    }
-
-    let farthestTile = fromTile;
-    let farthestDistance = -Infinity;
-
-    for (let tile of map.walkableTiles) {
-      
-      const distance =
-        Math.abs(tile.row - fromTile.row) +
-        Math.abs(tile.col - fromTile.col);
-
-      if (distance > farthestDistance) {
-        
-        farthestDistance = distance;
-        farthestTile = tile;
-      }
-    }
-
-    return farthestTile;
-  }
-  
-  
-  /*
-  Purpose: findClosestWalkableRow is a method that takes in a tile map, a preferred row index, and a side ('left' or 'right'), 
-  and searches for the closest walkable row to the preferred row on the specified side of the map.
-  
-  Parameters: - map: the tile map in which to search for the closest walkable row, which provides information about walkable tiles and localization for positioning.
-  */
-  findClosestWalkableRow(map, preferredRow, side = 'right') {
-    
-    const col = side === 'right' ? map.cols - 2 : 1;
-
-    for (let offset = 0; offset < map.rows; offset++) {
-      
-      const r1 = preferredRow + offset;
-      const r2 = preferredRow - offset;
-
-      if (r1 >= 1 && r1 < map.rows - 1 && map.grid[r1][col].isWalkable()) return r1;
-      if (r2 >= 1 && r2 < map.rows - 1 && map.grid[r2][col].isWalkable()) return r2;
-    }
-
-    return Math.max(1, Math.min(map.rows - 2, preferredRow));
-  }
-
-  
-  openMazeSide(map, row, side = 'right') {
-    
-    if (side === 'right') {
-      
-      map.grid[row][map.cols - 1].type = Tile.Type.EasyTerrain;
-      map.grid[row][map.cols - 2].type = Tile.Type.EasyTerrain;
-    
-    } else {
-      map.grid[row][0].type = Tile.Type.EasyTerrain;
-      map.grid[row][1].type = Tile.Type.EasyTerrain;
-    }
-  }
-
-
-  /*
-  Purpose: createHallway is a method that takes in the row indices for the doorway connections in map 1 and map 2, 
-  and creates a hallway mesh in the scene that visually connects the two mazes at those rows.
-  
-  Parameters: row1 - the index of the row in map 1 where the doorway for the hallway connection to map 2 is located.
-  */
-  createHallway(row1, row2) {
-    
-    const startTile1 = this.map.grid[row1][this.map.cols - 1];
-    const startTile2 = this.map2.grid[row2][0];
-
-    const p1 = this.map.localize(startTile1);
-    const p2 = this.map2.localize(startTile2).clone().add(this.map2Offset);
-
-    const hallwayY = 0.02;
-    const hallwayThickness = 0.05;
-    const hallwayDepth = this.map.tileSize;
-
-    const straightCenterX = (p1.x + p2.x) / 2;
-    const straightCenterZ = p1.z;
-    const straightWidth = Math.abs(p2.x - p1.x);
-
-    const straightGeo = new THREE.BoxGeometry(straightWidth, hallwayThickness, hallwayDepth);
-    const straightMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0 });
-    const straightHall = new THREE.Mesh(straightGeo, straightMat);
-    straightHall.position.set(straightCenterX, hallwayY, straightCenterZ);
-    this.scene.add(straightHall);
-
-    this.hallwayMesh = straightHall;
-
-    this.hallwayBounds = {
-      minX: Math.min(p1.x, p2.x),
-      maxX: Math.max(p1.x, p2.x),
-      minZ: p1.z - hallwayDepth / 2,
-      maxZ: p1.z + hallwayDepth / 2
-    };
-
-    // if the doorway rows are different, add a vertical connector near maze 2
-    if (p1.z !== p2.z) {
-
-      const verticalDepth = Math.abs(p2.z - p1.z) + hallwayDepth;
-      const verticalCenterZ = (p1.z + p2.z) / 2;
-      const verticalGeo = new THREE.BoxGeometry(this.map.tileSize, hallwayThickness, verticalDepth);
-      const verticalMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0 });
-      const verticalHall = new THREE.Mesh(verticalGeo, verticalMat);
-      verticalHall.position.set(p2.x, hallwayY, verticalCenterZ);
-      
-      this.scene.add(verticalHall);
-      this.hallwayBounds.minX = Math.min(this.hallwayBounds.minX, p2.x - this.map.tileSize / 2);
-      this.hallwayBounds.maxX = Math.max(this.hallwayBounds.maxX, p2.x + this.map.tileSize / 2);
-      this.hallwayBounds.minZ = Math.min(this.hallwayBounds.minZ, verticalCenterZ - verticalDepth / 2);
-      this.hallwayBounds.maxZ = Math.max(this.hallwayBounds.maxZ, verticalCenterZ + verticalDepth / 2);
-    }
-  }
-
-  // create doorway connection between maze 2 and dungeon
-  /*
-  Purpose: createHallwayBetweenMap2AndDungeon is a method that takes in the row indices for the doorway connections in map 2 and the dungeon, and creates a hallway 
-  mesh in the scene that visually connects the two maps at those rows.
-  
-  Parameters: row2 - the index of the row in map 2 where the doorway for the hallway connection to the dungeon is located. 
-  row3 - the index of the row in the dungeon where the doorway for the hallway connection from map 2 is located. 
-  */
-  createHallwayBetweenMap2AndDungeon(row2, row3) {
-  
-  const startTile2 = this.map2.grid[row2][this.map2.cols - 1];
-  const startTile3 = this.dungeonMap.grid[row3][0];
-  const p2 = this.map2.localize(startTile2).clone().add(this.map2Offset);
-  const p3 = this.dungeonMap.localize(startTile3).clone().add(this.dungeonOffset);
-  const hallwayY = 0.02;
-  const hallwayThickness = 0.05;
-  const hallwayDepth = this.map2.tileSize;
-  const straightCenterX = (p2.x + p3.x) / 2;
-  const straightCenterZ = p2.z;
-  const straightWidth = Math.abs(p3.x - p2.x);
-  const straightGeo = new THREE.BoxGeometry(straightWidth, hallwayThickness, hallwayDepth);
-  const straightMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0 });
-  const straightHall = new THREE.Mesh(straightGeo, straightMat);
-  
-  straightHall.position.set(straightCenterX, hallwayY, straightCenterZ);
-  
-  this.scene.add(straightHall);
-  this.hallwayMesh2 = straightHall;
-  
-  this.hallwayBounds2 = {
-    minX: Math.min(p2.x, p3.x),
-    maxX: Math.max(p2.x, p3.x),
-    minZ: p2.z - hallwayDepth / 2,
-    maxZ: p2.z + hallwayDepth / 2
-  };
-
-  if (p2.z !== p3.z) {
-    
-    const verticalDepth = Math.abs(p3.z - p2.z) + hallwayDepth;
-    const verticalCenterZ = (p2.z + p3.z) / 2;
-    const verticalGeo = new THREE.BoxGeometry(this.map2.tileSize, hallwayThickness, verticalDepth);
-    const verticalMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0 });
-    const verticalHall = new THREE.Mesh(verticalGeo, verticalMat);
-    
-    verticalHall.position.set(p3.x, hallwayY, verticalCenterZ);
-    
-    this.scene.add(verticalHall);
-    this.hallwayBounds2.minX = Math.min(this.hallwayBounds2.minX, p3.x - this.map2.tileSize / 2);
-    this.hallwayBounds2.maxX = Math.max(this.hallwayBounds2.maxX, p3.x + this.map2.tileSize / 2);
-    this.hallwayBounds2.minZ = Math.min(this.hallwayBounds2.minZ, verticalCenterZ - verticalDepth / 2);
-    this.hallwayBounds2.maxZ = Math.max(this.hallwayBounds2.maxZ, verticalCenterZ + verticalDepth / 2);
-  }
-}
-
-// make sure the door of dungeon is aligned with the hallway from map 2
-/*
-Purpose: connectSideToInterior is a method that takes in a tile map, a row index, and a side ('left' or 'right'), and modifies the tiles along that row on the specified side 
-of the map to create a walkable path that connects the doorway created for the hallway 
-
-Parameters: - map: the tile map in which to create the connection from the hallway doorway into the interior of the dungeon, which provides information about walkable tiles 
-and localization for positioning. - row: the index of the row in the tile map where the doorway for the hallway is located and where we want to create the connection into the interior of the dungeon. 
-
-*/
-connectSideToInterior(map, row, side = 'left') {
-  
-  if (side === 'left') {
-    let foundWalkable = false;
-
-    for (let c = 0; c < map.cols; c++) {
-      
-      if (map.grid[row][c].isWalkable()) {
-        foundWalkable = true;
-        break;
-      }
-    }
-
-    if (!foundWalkable) return;
-
-    for (let c = 0; c < map.cols; c++) {
-      
-      map.grid[row][c].type = Tile.Type.EasyTerrain;
-      
-      if (c > 1 && map.grid[row][c + 1] && map.grid[row][c + 1].isWalkable()) {
-        break;
-      }
-    }
-  
-  } else {
-    let foundWalkable = false;
-
-    for (let c = map.cols - 1; c >= 0; c--) {
-      
-      if (map.grid[row][c].isWalkable()) {
-        foundWalkable = true;
-        break;
-      }
-    }
-
-    if (!foundWalkable) return;
-
-    for (let c = map.cols - 1; c >= 0; c--) {
-      
-      map.grid[row][c].type = Tile.Type.EasyTerrain;
-      
-      if (c < map.cols - 2 && map.grid[row][c - 1] && map.grid[row][c - 1].isWalkable()) {
-        break;
-      }
-    }
-  }
+  //this.createGoalsForMap(this.map2, this.map2Offset, 5);
+  //this.createNPCsForMap(this.map2, this.map2Offset, 10);
+  this.energyCellManager.createEnergyCellsForMap(this.map2, this.map2Offset, 3);
+  this.energyCellManager.createEnergyCellsForMap(this.dungeonMap, this.dungeonOffset, 3);
+  this.controllerExitManager.updateEnergyUnlockRequirement();
 }
 
 /*
@@ -567,13 +332,30 @@ Parameters: position - a THREE.Vector3 representing the current position of the 
 getMapForPosition(position) {
   
   if (this.isInHallway(position)) {
+    
     return this.hallwayMap;
+  
   }
 
-  const dungeonStartX = this.dungeonOffset.x - this.dungeonMap.tileSize / 2;
-  const map2StartX = this.map2Offset.x - this.map2.tileSize / 2;
+  const inMap1 =
+    position.x >= this.map.minX &&
+    position.x <= this.map.minX + this.map.cols * this.map.tileSize &&
+    position.z >= this.map.minZ &&
+    position.z <= this.map.minZ + this.map.rows * this.map.tileSize;
 
-  if (position.x >= dungeonStartX) {
+  const inMap2 =
+    position.x >= this.map2Offset.x + this.map2.minX &&
+    position.x <= this.map2Offset.x + this.map2.minX + this.map2.cols * this.map2.tileSize &&
+    position.z >= this.map2.minZ &&
+    position.z <= this.map2.minZ + this.map2.rows * this.map2.tileSize;
+
+  const inDungeon =
+    position.x >= this.dungeonOffset.x + this.dungeonMap.minX &&
+    position.x <= this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize &&
+    position.z >= this.dungeonMap.minZ &&
+    position.z <= this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize;
+
+  if (inDungeon) {
     
     return {
       handleCollisions: (entity) => {
@@ -583,12 +365,14 @@ getMapForPosition(position) {
         };
 
         const corrected = this.dungeonMap.handleCollisions(fakeEntity);
+        
         return corrected.add(this.dungeonOffset);
+      
       }
     };
   }
 
-  if (position.x >= map2StartX) {
+  if (inMap2) {
     
     return {
       handleCollisions: (entity) => {
@@ -598,113 +382,23 @@ getMapForPosition(position) {
         };
 
         const corrected = this.map2.handleCollisions(fakeEntity);
+        
         return corrected.add(this.map2Offset);
+      
       }
     };
   }
 
-  return this.map;
+  if (inMap1) {
+    
+    return this.map;
+  
+  }
+
+  return this.hallwayMap;
 }
 
   
-// for second maze ....create NPCs with offset
-/*
-Purpose: createNPCsForMap is a method that creates a specified number of NPC (non-player character) entities in a given tile map with a specified offset for positioning.
-Parameters: - map: the tile map in which to create the NPCs, which provides information about walkable tiles and localization for positioning.
-*/
-createNPCsForMap(map, offset, numNPCs = 10) {
-    
-  this.modelsLoading += numNPCs;
-
-    for (let i = 0; i < numNPCs; i++) {
-      
-      let randomTile =
-        map.walkableTiles[Math.floor(Math.random() * map.walkableTiles.length)];
-
-      let position = map.localize(randomTile).clone().add(offset);
-
-      let npc = new DynamicEntity({
-        position: position,
-        velocity: new THREE.Vector3(0, 0, 0),
-        color: 0xffaa33,
-        scale: new THREE.Vector3(1, 1, 1)
-      });
-
-      npc.mesh.rotation.y = Math.random() * Math.PI * 2;
-      npc.boatLoaded = false;
-
-      const tempGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-      const tempMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffaa33,
-        emissive: 0x442200,
-        transparent: true,
-        opacity: 0.7
-      });
-      const tempCube = new THREE.Mesh(tempGeometry, tempMaterial);
-      tempCube.position.set(0, 0.75, 0);
-      npc.mesh.add(tempCube);
-
-      const indicatorGeo = new THREE.ConeGeometry(0.3, 0.8, 8);
-      const indicatorMat = new THREE.MeshStandardMaterial({ color: 0xffff00 });
-      const indicator = new THREE.Mesh(indicatorGeo, indicatorMat);
-      indicator.position.set(0, 1.8, 0);
-      indicator.userData = { spinSpeed: 0.1 };
-      npc.mesh.add(indicator);
-      npc.loadingIndicator = indicator;
-
-      const loader = new GLTFLoader();
-      loader.load(
-        '/animated_drone/scene.gltf',
-        (gltf) => {
-          const model = gltf.scene;
-          const currentRotation = npc.mesh.rotation.y;
-
-          while (npc.mesh.children.length > 0) {
-            npc.mesh.remove(npc.mesh.children[0]);
-          }
-
-          model.scale.set(10, 10, 10);
-          model.position.set(0, -0.5, 0);
-
-          const box = new THREE.Box3().setFromObject(model);
-          model.position.y = -box.min.y;
-          model.userData.forwardAxis = 'x';
-
-          npc.mesh.add(model);
-          npc.boatModel = model;
-          npc.boatLoaded = true;
-          npc.color = 0xff3333;
-          npc.mesh.rotation.y = currentRotation;
-
-          if (gltf.animations && gltf.animations.length > 0) {
-            const mixer = new THREE.AnimationMixer(model);
-            const action = mixer.clipAction(gltf.animations[0]);
-            action.play();
-            npc.mixer = mixer;
-            this.mixers.push(mixer);
-          }
-
-          this.modelsLoaded++;
-          this.updateLoadingIndicator();
-        },
-        undefined,
-        () => {
-          if (npc.mesh.children[0]) {
-            npc.mesh.children[0].material.color.setHex(0xff0000);
-          }
-
-          npc.boatLoaded = true;
-          npc.loadError = true;
-
-          this.modelsLoaded++;
-          this.updateLoadingIndicator();
-        }
-      );
-
-      this.npcs.push(npc);
-      this.addEntityToWorld(npc);
-    }
-  }
 
   // Create a loading indicator in the scene
   /*
@@ -797,85 +491,6 @@ Purpose: updateLoadingIndicator is a method that updates the loading indicator d
     this.entities.push(entity);
   
   }
-
-  
-
-
-// for maze 2 position update
-/*
-purpose: determine which map (maze 1, maze 2, hallway, or dungeon) the character is currently in based on their position, and return the appropriate map object for collision handling
-approach: check the character's position against the bounds of the hallway first, then check against the bounds of maze 1, maze 2, and dungeon in order. 
-For maze 2 and dungeon, return a wrapper object that adjusts entity positions
-vector -> map object with handleCollisions method 
-*/ 
-getMapForPosition(position) {
-  
-  if (this.isInHallway(position)) {
-    
-    return this.hallwayMap;
-  
-  }
-
-  const inMap1 =
-    position.x >= this.map.minX &&
-    position.x <= this.map.minX + this.map.cols * this.map.tileSize &&
-    position.z >= this.map.minZ &&
-    position.z <= this.map.minZ + this.map.rows * this.map.tileSize;
-
-  const inMap2 =
-    position.x >= this.map2Offset.x + this.map2.minX &&
-    position.x <= this.map2Offset.x + this.map2.minX + this.map2.cols * this.map2.tileSize &&
-    position.z >= this.map2.minZ &&
-    position.z <= this.map2.minZ + this.map2.rows * this.map2.tileSize;
-
-  const inDungeon =
-    position.x >= this.dungeonOffset.x + this.dungeonMap.minX &&
-    position.x <= this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize &&
-    position.z >= this.dungeonMap.minZ &&
-    position.z <= this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize;
-
-  if (inDungeon) {
-    
-    return {
-      handleCollisions: (entity) => {
-        const fakeEntity = {
-          ...entity,
-          position: entity.position.clone().sub(this.dungeonOffset)
-        };
-
-        const corrected = this.dungeonMap.handleCollisions(fakeEntity);
-        
-        return corrected.add(this.dungeonOffset);
-      
-      }
-    };
-  }
-
-  if (inMap2) {
-    
-    return {
-      handleCollisions: (entity) => {
-        const fakeEntity = {
-          ...entity,
-          position: entity.position.clone().sub(this.map2Offset)
-        };
-
-        const corrected = this.map2.handleCollisions(fakeEntity);
-        
-        return corrected.add(this.map2Offset);
-      
-      }
-    };
-  }
-
-  if (inMap1) {
-    
-    return this.map;
-  
-  }
-
-  return this.hallwayMap;
-}
 
 // helper function to clamp position within hallway bounds (for main character)
 /**
@@ -1015,38 +630,6 @@ isPlayerOnSafeTile() {
 }
 
 
-// for safe exit 
-/**purpose: randomly convert a certain number of walkable tiles in maze 2 to medium terrain tiles, which serve as safe spots for the player to hide from drones. 
-*The function first collects all valid walkable tiles that are not already medium terrain, shuffles them randomly, and then converts the first N tiles to medium terrain.
-*@param {Map} map - the map object representing maze 2
-*@param {number} count - the number of tiles to convert to medium terrain (default is 8)
-*@returns null
-*/
-addExtraGreenTiles(map, count = 8) {
-  // get ALL valid tiles first
-  let candidates = map.walkableTiles.filter(
-    tile => tile.type !== Tile.Type.MediumTerrain
-  );
-
-  // shuffle randomly
-  for (let i = candidates.length - 1; i > 0; i--) {
-    
-    let j = Math.floor(Math.random() * (i + 1));
-    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
-  
-  }
-
-  // take first N tiles
-  let selected = candidates.slice(0, count);
-
-  // convert to green
-  for (let tile of selected) {
-    
-    tile.type = Tile.Type.EasyTerrain;
-  
-  }
-}
-
 // controller exit wrapper 
 isPlayerAtUnlockedControllerExit() {
   return this.controllerExitManager.isPlayerAtUnlockedControllerExit();
@@ -1088,6 +671,7 @@ reset() {
   this.mazeGroup2 = null;
   this.hallwayMesh = null;
   this.loadingSprite = null;
+  this.hallwayBounds = null;
 
   this.dungeonGroup = null;
   this.dungeonRenderer = null;
