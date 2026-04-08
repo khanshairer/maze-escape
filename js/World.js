@@ -5,7 +5,9 @@ import { TileMap } from './maps/TileMap.js'; // for creating and managing the ti
 import { Tile } from './maps/Tile.js'; // for representing individual tiles in the tile maps with properties like type and walkability
 import { TileMapRenderer } from './renderers/TileMapRenderer.js'; // for rendering the tile maps visually in the scene
 import { DynamicEntity } from './entities/DynamicEntity.js'; // for representing dynamic entities in the world
+import { GroundAttacker } from './entities/GroundAttacker.js';
 import { DroneEnemy } from './entities/DroneEnemy.js'; // for representing flying drone enemies in the second maze that chase the player 
+import { DungeonGuard } from './entities/DungeonGuard.js';
 import { EnergyCell } from './entities/EnergyCell.js'; // creating main goal objects in the world
 import { GLTFLoader } from 'three/examples/jsm/Addons.js'; // for loading 3D models in GLTF format for the main character and other entities
 import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js'; // for implementing vector path finding..
@@ -13,8 +15,6 @@ import { HierarchicalAStar } from './ai/pathfinding/HierarchicalAStar.js'; // fo
 import { DebugVisuals } from './debug/DebugVisuals.js'; // for deugging purposes..
 import { DungeonGenerator } from './pcg/DungeonGenerator.js'; // for procedurally generating the dungeon map with rooms and corridors for the third part of the world
 import { JPS } from './ai/pathfinding/JPS.js'; // importing jumppointsearch functionality 
-import { ReynoldsPathFollowing } from './ai/steering/ReynoldsPathFollowing.js'; //implements reynolds path following...
-import { SteeringBehaviours } from './ai/steering/SteeringBehaviours.js'; // for puruse 
 
 /**
  * World class holds all information about our game's world
@@ -1146,85 +1146,46 @@ addDroneDetectionCircle(drone) {
 - numAttackers: the number of ground attackers to create (default is 10)
   */
   createGroundAttackers(numAttackers = 10) {
-  this.ground_attackers = [];
-  this.modelsLoading += numAttackers;
+    this.ground_attackers = [];
+    this.modelsLoading += numAttackers;
 
-  for (let i = 0; i < numAttackers; i++) {
-    
-    let attackerTile;
-    let attackerPosition;
-    let tries = 0;
+    for (let i = 0; i < numAttackers; i++) {
+      const attackerTile = GroundAttacker.findSpawnTile(this.map, {
+        avoidPositions: [
+          new THREE.Vector3(0, 0, 0),
+          this.map.localize(this.doorGoal)
+        ],
+        peers: this.ground_attackers
+      });
 
-    do {
-      attackerTile = this.map.getRandomWalkableTile();
-      attackerPosition = this.map.localize(attackerTile);
-      tries++;
-    } while (
-      tries < 300 &&
-      (
-        attackerPosition.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
-        attackerPosition.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
-        this.ground_attackers.some(a => a.position.distanceTo(attackerPosition) < 5)
-      )
-    );
+      const attackerPosition = this.map.localize(attackerTile);
+      const attacker = new GroundAttacker({
+        spawnTile: attackerTile,
+        patrolMap: this.map,
+        goalTile: this.doorGoal,
+        position: attackerPosition.clone(),
+        velocity: new THREE.Vector3(0, 0, 0),
+        color: 0x660000,
+        scale: new THREE.Vector3(1, 0.75, 1)
+      });
 
-    let attacker = new DynamicEntity({
-      position: attackerPosition.clone(),
-      velocity: new THREE.Vector3(0, 0, 0),
-      color: 0x660000,
-      scale: new THREE.Vector3(1, 0.75, 1)
-    });
-
-    attacker.boatLoaded = false;
-    attacker.position.y = 1;
-    attacker.modelFacingOffset = 0;
-
-    const loader = new GLTFLoader();
-    loader.load(
-      '/sphere_robot/scene.gltf',
-      (gltf) => {
-        const model = gltf.scene;
-
-        while (attacker.mesh.children.length > 0) {
-          attacker.mesh.remove(attacker.mesh.children[0]);
+      attacker.position.y = 1;
+      attacker.loadVisual({
+        mixers: this.mixers,
+        onLoaded: () => {
+          this.modelsLoaded++;
+          this.updateLoadingIndicator();
+        },
+        onError: () => {
+          this.modelsLoaded++;
+          this.updateLoadingIndicator();
         }
+      });
 
-        model.scale.set(2.2, 2.2, 2.2);
-
-        const box = new THREE.Box3().setFromObject(model);
-        model.position.y = -box.min.y;
-        model.rotation.y = 0;
-
-        attacker.mesh.add(model);
-        attacker.robotModel = model;
-        attacker.boatLoaded = true;
-
-        if (gltf.animations && gltf.animations.length > 0) {
-          
-          const mixer = new THREE.AnimationMixer(model);
-          const action = mixer.clipAction(gltf.animations[0]);
-          action.play();
-          attacker.mixer = mixer;
-          this.mixers.push(mixer);
-        
-        }
-
-        this.modelsLoaded++;
-        this.updateLoadingIndicator();
-      },
-      undefined,
-      (error) => {
-        attacker.boatLoaded = true;
-        attacker.loadError = true;
-        this.modelsLoaded++;
-        this.updateLoadingIndicator();
-      }
-    );
-
-    this.ground_attackers.push(attacker);
-    this.addEntityToWorld(attacker);
+      this.ground_attackers.push(attacker);
+      this.addEntityToWorld(attacker);
+    }
   }
-}
 
   // create npcs with visual loading feedback
   /*
@@ -1533,33 +1494,12 @@ If there is an error during loading, the cube turns red to indicate the failure.
   
   */
   respawnGroundAttacker(npc) {
-  
-    let spawnTile;
-    let spawnPos;
-    let tries = 0;
-
-    do {
-      spawnTile = this.map.getRandomWalkableTile();
-      spawnPos = this.map.localize(spawnTile);
-      tries++;
-    } while (
-      tries < 300 &&
-      (
-      
-        spawnPos.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
-        spawnPos.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
-        this.ground_attackers.some(a =>
-        a !== npc && a.position.distanceTo(spawnPos) < 5
-      )
-    )
-  );
-
-  npc.position.copy(spawnPos);
-  npc.position.y = 1;
-
-  npc.velocity.set(0, 0, 0);
-  if (npc.acceleration) npc.acceleration.set(0, 0, 0);
-}
+    npc.respawn(this.map, {
+      goalTile: this.doorGoal,
+      playerSpawnPosition: new THREE.Vector3(0, 0, 0),
+      peers: this.ground_attackers
+    });
+  }
 
   
  /*
@@ -1826,86 +1766,6 @@ clampPositionToDungeon(entity) {
 
 }
 
-//helper for Update Ground Attacker
-/*
-*purpose: determine the best adjacent tile for a ground attacker to move to in order to escape from the main character, by maximizing the distance from the main character
-*approach: get the current tile of the NPC, find all walkable neighboring tiles, and calculate the distance from each neighbor to the main character. 
-*Return the position of the neighbor
-*@param {DynamicEntity} npc
-*@returns {THREE.Vector3|null} position of the best escape tile, or null if no valid tiles are found
-*/
-getEscapeTargetFromCurrentTile(npc) {
-  
-  const tile = this.map.quantize(npc.position);
-  const neighbours = this.map.getNeighbours(tile);
-
-  if (!neighbours || neighbours.length === 0) return null;
-
-  let bestTile = neighbours[0];
-  let bestDist = -Infinity;
-
-  for (let n of neighbours) {
-    
-    const pos = this.map.localize(n);
-    const dist = pos.distanceTo(this.main_character.position);
-    
-    if (dist > bestDist) {
-      
-      bestDist = dist;
-      bestTile = n;
-    
-    }
-  }
-
-  return this.map.localize(bestTile);
-}
-
-//keep the ground attacker on the ground, prevent it from escaping to maze 2, and add wander/chase/avoid behaviours
-
-/*
-*purpose: snap an entity to the nearest walkable tile
-*approach: find the tile that the entity is on, and if it's not walkable, find the nearest walkable tile and move the entity there
-*@param {DynamicEntity} entity
-*@returns null
-*/
-snapEntityToWalkableTile(entity) {
-  
-  let tile = this.map.quantize(entity.position);
-
-  if (tile && tile.isWalkable()) {
-    
-    return;
-  
-  }
-
-  let bestTile = null;
-  let bestDist = Infinity;
-
-  for (let walkable of this.map.walkableTiles) {
-    
-    let pos = this.map.localize(walkable);
-    let dist = pos.distanceTo(entity.position);
-
-    if (dist < bestDist) {
-      
-      bestDist = dist;
-      bestTile = walkable;
-    
-    }
-  }
-
-  if (bestTile) {
-    
-    let safePos = this.map.localize(bestTile);
-    entity.position.x = safePos.x;
-    entity.position.z = safePos.z;
-    entity.velocity.set(0, 0, 0);
-  
-  }
-}
-
-// add wander behaviour for ground attacker
-
 /*
 *purpose: update the position of ground attackers by keeping them on the ground, preventing them from escaping to maze 2, and 
 adding simple wander/chase/avoid behaviours based on the player's position
@@ -1923,39 +1783,17 @@ updateGroundAttackers() {
   if (!this.doorGoal || !this.groundVectorPathFinding) return;
 
   for (let npc of this.ground_attackers) {
-    
-    npc.position.y = 1;
-    if (npc.velocity) npc.velocity.y = 0;
-    
-    if (npc.acceleration) npc.acceleration.y = 0;
+    npc.prepareForUpdate();
 
-    const currentTile = this.map.quantize(npc.position);
-
-    // respawn as soon as attacker reaches the goal tile
-    if (
-      currentTile &&
-      currentTile.row === this.doorGoal.row &&
-      currentTile.col === this.doorGoal.col
-    ) {
+    if (npc.isAtGoalTile(this.doorGoal, this.map)) {
       this.respawnGroundAttacker(npc);
-      continue;
     }
   }
 
   this.groundVectorPathFinding.runVectorFieldPathFinding(this.doorGoal);
 
-  const minX = this.map.minX + 1;
-  const maxX = this.map.minX + this.map.cols * this.map.tileSize - 1;
-  const minZ = this.map.minZ + 1;
-  const maxZ = this.map.minZ + this.map.rows * this.map.tileSize - 1;
-
   for (let npc of this.ground_attackers) {
-    
-    npc.position.x = THREE.MathUtils.clamp(npc.position.x, minX, maxX);
-    npc.position.z = THREE.MathUtils.clamp(npc.position.z, minZ, maxZ);
-    this.snapEntityToWalkableTile(npc);
-    npc.position.y = 1;
-  
+    npc.finalizeMovement(this.map);
   }
 }
 
@@ -2178,7 +2016,9 @@ createDungeonGuard() {
   const spawnIndex = Math.floor(this.dungeonPatrolPath.length / 2);
   const startPos = this.dungeonPatrolPath[spawnIndex].clone();
 
-  this.dungeonGuard = new DynamicEntity({
+  this.dungeonGuard = new DungeonGuard({
+    patrolPath: this.dungeonPatrolPath,
+    spawnIndex,
     position: new THREE.Vector3(startPos.x, 1.0, startPos.z),
     velocity: new THREE.Vector3(0, 0, 0),
     topSpeed: 4.4,
@@ -2186,80 +2026,10 @@ createDungeonGuard() {
     scale: new THREE.Vector3(1, 1, 1)
   });
 
-  this.dungeonGuard.isDungeonGuard = true;
   this.dungeonGuard.maxForce = 8.0;
-
-  this.dungeonGuard.pathFollower = {
-    path: this.dungeonPatrolPath,
-    segmentIndex: spawnIndex,
-    pathRadius: 0.25,
-    predictDistance: 0.15,
-    targetOffset: 0.08
-  };
-
-  this.dungeonGuard.modelFacingOffset = 0;
-  this.dungeonGuard.detectRadius = 12;
-  this.dungeonGuard.catchRadius = 1.5;
-  this.dungeonGuard.isChasing = false;
-  this.dungeonGuard.lookAhead = 0.6;
-
-  const tempBody = new THREE.Mesh(
-    new THREE.BoxGeometry(1.2, 2.0, 1.2),
-    new THREE.MeshStandardMaterial({
-      color: 0xff0000,
-      emissive: 0x330000
-    })
-  );
-  tempBody.position.set(0, 1.0, 0);
-  this.dungeonGuard.mesh.add(tempBody);
-  this.dungeonGuard.tempBody = tempBody;
-
-  const loader = new GLTFLoader();
-  loader.load(
-    '/walking_mario/scene.gltf',
-    (gltf) => {
-      const model = gltf.scene;
-
-      if (this.dungeonGuard.tempBody) {
-        this.dungeonGuard.mesh.remove(this.dungeonGuard.tempBody);
-        this.dungeonGuard.tempBody.geometry.dispose();
-        this.dungeonGuard.tempBody.material.dispose();
-        this.dungeonGuard.tempBody = null;
-      }
-
-      while (this.dungeonGuard.mesh.children.length > 0) {
-        this.dungeonGuard.mesh.remove(this.dungeonGuard.mesh.children[0]);
-      }
-
-      model.scale.set(0.015, 0.015, 0.015);
-
-      const box = new THREE.Box3().setFromObject(model);
-      model.position.y = -box.min.y;
-      model.rotation.y = 0;
-
-      this.dungeonGuard.mesh.add(model);
-      this.dungeonGuard.guardModel = model;
-
-      if (gltf.animations && gltf.animations.length > 0) {
-        
-        const mixer = new THREE.AnimationMixer(model);
-        this.dungeonGuard.mixer = mixer;
-        this.mixers.push(mixer);
-
-        const clipIndex = gltf.animations[1] ? 1 : 0;
-        const action = mixer.clipAction(gltf.animations[clipIndex]);
-        action.reset();
-        action.setEffectiveTimeScale(0.35);
-        action.play();
-
-        this.dungeonGuard.currentAction = action;
-
-      } 
-    },
-    undefined,
-    (error) => {
-    }
-  );
+  this.dungeonGuard.loadVisual({
+    mixers: this.mixers
+  });
 
   this.addEntityToWorld(this.dungeonGuard);
 
@@ -2273,103 +2043,13 @@ createDungeonGuard() {
 *@returns null
 */
 updateDungeonGuard(dt) {
-  
   if (!this.dungeonGuard) return;
-  if (!this.dungeonGuard.pathFollower) return;
-  if (!this.main_character) return;
 
-  const pf = this.dungeonGuard.pathFollower;
-  const path = pf.path;
-
-  if (!path || path.length < 2) return;
-
-  const toPlayer = this.main_character.position.clone().sub(this.dungeonGuard.position);
-  toPlayer.y = 0;
-  const playerDistance = toPlayer.length();
-
-  this.dungeonGuard.isChasing = playerDistance <= this.dungeonGuard.detectRadius;
-
-  let steering;
-
-  if (this.dungeonGuard.isChasing) {
-    steering = SteeringBehaviours.pursue(
-      this.dungeonGuard,
-      this.main_character,
-      this.dungeonGuard.lookAhead
-    );
-  } else {
-    steering = ReynoldsPathFollowing.followLoop(this.dungeonGuard);
-  }
-
-  steering.clampLength(0, this.dungeonGuard.maxForce);
-  this.dungeonGuard.applyForce(steering);
-
-  const dungeonAdapter = {
-    handleCollisions: (entity) => {
-      const fakeEntity = {
-        ...entity,
-        position: entity.position.clone().sub(this.dungeonOffset)
-      };
-
-      const corrected = this.dungeonMap.handleCollisions(fakeEntity);
-      
-      return corrected.add(this.dungeonOffset);
-    
-    }
-  };
-
-  this.dungeonGuard.update(dt, dungeonAdapter);
-  this.dungeonGuard.position.y = 1.0;
-  this.dungeonGuard.velocity.y = 0;
-  this.dungeonGuard.velocity.clampLength(0, this.dungeonGuard.topSpeed);
-
-  let facingDir = new THREE.Vector3();
-
-  if (this.dungeonGuard.isChasing) {
-    
-    facingDir = this.main_character.position.clone().sub(this.dungeonGuard.position);
-    facingDir.y = 0;
-  
-  } else {
-    
-    const a = path[pf.segmentIndex % path.length];
-    const b = path[(pf.segmentIndex + 1) % path.length];
-    const ab = b.clone().sub(a);
-    const abLenSq = ab.lengthSq();
-
-    if (abLenSq > 0) {
-      const ap = this.dungeonGuard.position.clone().sub(a);
-      let t = ap.dot(ab) / abLenSq;
-      t = THREE.MathUtils.clamp(t, 0, 1);
-
-      const closestPoint = a.clone().add(ab.clone().multiplyScalar(t));
-      const offsetFromPath = this.dungeonGuard.position.clone().sub(closestPoint);
-      offsetFromPath.y = 0;
-
-      const maxDrift = pf.pathRadius ?? 0.25;
-
-      if (offsetFromPath.length() > maxDrift) {
-        const correctedPos = closestPoint.clone();
-        correctedPos.y = 1.0;
-        this.dungeonGuard.position.lerp(correctedPos, 0.2);
-
-        this.dungeonGuard.velocity.multiplyScalar(0.5);
-        this.dungeonGuard.velocity.y = 0;
-        this.dungeonGuard.velocity.clampLength(0, this.dungeonGuard.topSpeed);
-      }
-    }
-
-    facingDir = b.clone().sub(a);
-    facingDir.y = 0;
-  }
-
-  if (facingDir.lengthSq() > 0.0001) {
-    facingDir.normalize();
-
-    const moveAngle = Math.atan2(facingDir.x, facingDir.z);
-    const facingOffset = this.dungeonGuard.modelFacingOffset ?? 0;
-    this.dungeonGuard.mesh.rotation.y = moveAngle + facingOffset;
-  }
+  this.dungeonGuard.updateBehavior(dt, {
+    player: this.main_character,
+    dungeonMap: this.dungeonMap,
+    dungeonOffset: this.dungeonOffset
+  });
 }
 
 // is player on safe tile in hallway 2 helper function
