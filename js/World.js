@@ -5,20 +5,22 @@ import { TileMap } from './maps/TileMap.js'; // for creating and managing the ti
 import { Tile } from './maps/Tile.js'; // for representing individual tiles in the tile maps with properties like type and walkability
 import { TileMapRenderer } from './renderers/TileMapRenderer.js'; // for rendering the tile maps visually in the scene
 import { DynamicEntity } from './entities/DynamicEntity.js'; // for representing dynamic entities in the world
-import { DroneEnemy } from './entities/DroneEnemy.js'; // for representing flying drone enemies in the second maze that chase the player 
-import { EnergyCell } from './entities/EnergyCell.js'; // creating main goal objects in the world
 import { GLTFLoader } from 'three/examples/jsm/Addons.js'; // for loading 3D models in GLTF format for the main character and other entities
 import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js'; // for implementing vector path finding..
 import { HierarchicalAStar } from './ai/pathfinding/HierarchicalAStar.js'; // for implementing hierarchical pathfinding for drones in maze 2
 import { DebugVisuals } from './debug/DebugVisuals.js'; // for deugging purposes..
 import { DungeonGenerator } from './pcg/DungeonGenerator.js'; // for procedurally generating the dungeon map with rooms and corridors for the third part of the world
-import { JPS } from './ai/pathfinding/JPS.js'; // importing jumppointsearch functionality 
-import { ReynoldsPathFollowing } from './ai/steering/ReynoldsPathFollowing.js'; //implements reynolds path following...
-import { SteeringBehaviours } from './ai/steering/SteeringBehaviours.js'; // for puruse 
+import { GroundAttackers } from './entities/GroundAttackers.js';
+import { DroneEntity } from './entities/DroneEntity.js';
+import { DungeonGuard } from './entities/DungeonGuard.js';
+import { MainCharacter } from './entities/MainCharacter.js';
+import { EnergyCellManager } from './gameLogic/EnergyCellManager.js';
+import { ControllerExitManager } from './gameLogic/ControllerExitManager.js';
 
 /**
  * World class holds all information about our game's world
  */
+
 export class World {
 
   // Creates a world instance
@@ -30,8 +32,10 @@ export class World {
     this.clock = new THREE.Clock();
     this.inputHandler = new InputHandler(this.camera);
     this.entities = [];
-
+ 
     // added ................
+    this.droneRespawnDelay = 0.8;
+    this.controllerExitManager = new ControllerExitManager(this);
     this.goals = []; // store goals entities for easy access
     this.npcs = []; // store npc entities for easy access
     this.mixers = []; // store animation mixers for updating in the main loop ..for animation purposes
@@ -229,7 +233,7 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
     this.dungeonMap,
     this.dungeonEntryTile
   );
-  this.createControllerExit();
+  this.controllerExitManager.createControllerExit();
 
   // -------- DOOR GOAL --------
   this.doorGoal = this.map.grid[row1][this.map.cols - 1];
@@ -238,16 +242,12 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
   }
 
   // main character
-  this.main_character = new DynamicEntity({
-    position: new THREE.Vector3(0, 0, 0),
-    velocity: new THREE.Vector3(0, 0, 0),
-    topSpeed: this.moveSpeed,
-    color: 0x3333ff,
-    scale: new THREE.Vector3(1, 1, 1)
-  });
+  this.mainCharacterManager = new MainCharacter(this);
+  this.mainCharacterManager.createMainCharacter();
 
   // crreate 10 ground attackers
-  this.createGroundAttackers(10);
+  this.groundAttackerManager = new GroundAttackers(this);
+  this.groundAttackerManager.create(10); // create 10 ground attackers in maze 1 to chase the player and create dynamic and challenging gameplay as they respawn after reaching the door goal to keep up the pressure on the player and make maze 1 more engaging
 
   // vector pathfinding 
   this.groundVectorPathFinding = new VectorPathFinding(
@@ -260,79 +260,34 @@ this.addExtraGreenTiles(this.map2, 8); // 8 tiles
   this.groundVectorPathFinding.buildCostField(this.doorGoal);
   this.groundVectorPathFinding.allTileArrows(this.doorGoal);
 
-  // ----- MAIN CHARACTER LOADING -----
-  const tempCubeGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-  const tempCubeMat = new THREE.MeshStandardMaterial({
-    color: 0x33aaff,
-    emissive: 0x004466,
-    transparent: true,
-    opacity: 0.8
-  });
-  const tempCube = new THREE.Mesh(tempCubeGeo, tempCubeMat);
-  tempCube.position.set(0, 0.75, 0);
-  this.main_character.mesh.add(tempCube);
-
-  const loadingRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.8, 0.1, 16, 32),
-    new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0x442200 })
-  );
-  loadingRing.position.set(0, 1.2, 0);
-  this.main_character.mesh.add(loadingRing);
-  this.main_character.loadingRing = loadingRing;
-
-  const loader = new GLTFLoader();
-  loader.load(
-    '/officer_with_gun/scene.gltf',
-    (gltf) => {
-      const model = gltf.scene;
-
-      while (this.main_character.mesh.children.length > 0) {
-        this.main_character.mesh.remove(this.main_character.mesh.children[0]);
-      }
-
-      model.scale.set(1.8, 1.8, 1.8);
-
-      const box = new THREE.Box3().setFromObject(model);
-      model.position.y = -box.min.y;
-
-      this.main_character.mesh.add(model);
-
-      if (gltf.animations && gltf.animations.length > 0) {
-        const mixer = new THREE.AnimationMixer(model);
-        this.mainCharacterMixer = mixer;
-
-        gltf.animations.forEach((clip, idx) => {
-          const action = mixer.clipAction(clip);
-          this.mainCharacterActions[idx] = action;
-        });
-
-        const idleAction = this.mainCharacterActions[0];
-        if (idleAction) {
-          idleAction.play();
-          this.currentMainAction = idleAction;
-        }
-      }
-    }
-  );
-
-  this.addEntityToWorld(this.main_character);
-
+  
   //this.createGoals(5);
   this.createLoadingIndicator();
-  this.createGameplayDrones(3);
-  //this.createNPCs(10);
-  this.createPatrolLoopInDungeon3();
-  this.drawDungeon3PatrolLoop();
-  this.createDungeonGuard();
+  
+  // Drone manager
+  this.droneManager = new DroneEntity(this);
+  this.droneManager.create(3); // create 10 drones in maze 2 to chase the player and create dynamic and challenging gameplay as they navigate through the larger and more complex maze 2, while also showcasing the hierarchical pathfinding with a cluster size of 5 for good performance and still intelligent movement from the drones as they pursue the player through maze 2
+
+  
+  // Dungeon guard Mananager
+  this.dungeonGuardManager = new DungeonGuard(this);
+
+  this.dungeonGuardManager.createPatrolLoopInDungeon3();
+  
+  this.dungeonGuardManager.drawDungeon3PatrolLoop();
+
+  this.dungeonGuardManager.createDungeonGuard();
+
 
   //create energy cells for unlocking controller exit
-  this.createEnergyCells(3);
+  this.energyCellManager = new EnergyCellManager(this);
+  this.energyCellManager.createEnergyCells(3);
 
 //this.createGoalsForMap(this.map2, this.map2Offset, 5);
 //this.createNPCsForMap(this.map2, this.map2Offset, 10);
-this.createEnergyCellsForMap(this.map2, this.map2Offset, 3);
-this.createEnergyCellsForMap(this.dungeonMap, this.dungeonOffset, 3);
-this.updateEnergyUnlockRequirement();
+this.energyCellManager.createEnergyCellsForMap(this.map2, this.map2Offset, 3);
+this.energyCellManager.createEnergyCellsForMap(this.dungeonMap, this.dungeonOffset, 3);
+this.controllerExitManager.updateEnergyUnlockRequirement();
 }
 
  
@@ -368,171 +323,8 @@ findFarthestWalkableTile (map, fromTile) {
 
     return farthestTile;
   }
-
-
-  /*
-  Purpose : createControllerExit is a method that creates the controller exit object in the dungeon based on the controllerExitTile location, 
-  and sets up its visual appearance and properties for unlocking and activation.
   
-  */
-  createControllerExit() {
-    
-    if (!this.controllerExitTile) {
-      return;
-    }
-
-    const exitPosition = this.dungeonMap
-      .localize(this.controllerExitTile)
-      .clone()
-      .add(this.dungeonOffset);
-
-    const group = new THREE.Group();
-    group.position.copy(exitPosition);
-
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.1, 1.3, 0.4, 24),
-      new THREE.MeshStandardMaterial({
-        color: 0x30363d,
-        emissive: 0x111111
-      })
-    );
-
-    base.position.y = 0.2;
-    group.add(base);
-
-    const coreMaterial = new THREE.MeshStandardMaterial({
-      color: 0xff5533,
-      emissive: 0x661100,
-      emissiveIntensity: 1.2
-    });
-
-    const core = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.55, 0.55, 1.8, 18),
-      coreMaterial
-    );
-    core.position.y = 1.2;
-    group.add(core);
-
-    const beacon = new THREE.Mesh(
-      new THREE.TorusGeometry(0.95, 0.08, 12, 24),
-      new THREE.MeshStandardMaterial({
-        color: 0xffaa44,
-        emissive: 0x553300,
-        emissiveIntensity: 0.9
-      })
-    );
-    beacon.rotation.x = Math.PI / 2;
-    beacon.position.y = 1.2;
-    group.add(beacon);
-
-    group.userData = {
-      base,
-      core,
-      beacon,
-      lockedColor: 0xff5533,
-      lockedEmissive: 0x661100,
-      unlockedColor: 0x33ff99,
-      unlockedEmissive: 0x116644
-    };
-
-    this.controllerExit = {
-      mesh: group,
-      position: exitPosition,
-      tile: this.controllerExitTile
-    };
-
-    this.scene.add(group);
-    this.updateControllerExitVisualState(0);
-  }
-
-  /*
-  Purpose : updateControllerExitVisualState is a method that updates the visual appearance of the controller exit in the dungeon based on whether it is currently unlocked or locked.
-  Parameters: timestep(dt) - the time elapsed since the last update
-  */
-  updateControllerExitVisualState(dt = 0) {
-    
-    if (!this.controllerExit) {
-      return;
-    }
-
-    const { core, beacon, lockedColor, lockedEmissive, unlockedColor, unlockedEmissive } =
-      this.controllerExit.mesh.userData;
-
-    if (this.controllerExitUnlocked) {
-      
-      core.material.color.setHex(unlockedColor);
-      core.material.emissive.setHex(unlockedEmissive);
-      beacon.material.color.setHex(0xaaffdd);
-      beacon.material.emissive.setHex(0x227755);
-      beacon.rotation.z += dt * 1.5;
-    
-    } else {
-      core.material.color.setHex(lockedColor);
-      core.material.emissive.setHex(lockedEmissive);
-      beacon.material.color.setHex(0xffaa44);
-      beacon.material.emissive.setHex(0x553300);
-      beacon.rotation.z += dt * 0.35;
-    }
-  }
-
-
-  /*
-  Purpose : updateControllerExitState is a method that checks if the controller exit in the dungeon should be unlocked based on the number of energy cells collected by the player
-  Paramters : timestep(dt) - the time elapsed since the last update, which can be used to create smooth animations for the controller exit's visual state changes 
-  when it transitions between locked and unlocked states based on energy cell collection. This method updates the controller exit's unlocked state and visual appearance accordingly.
-  */
-  updateControllerExitState(dt) {
-    
-    if (!this.controllerExit) {
-      return;
-    }
-
-    this.controllerExitUnlocked =
-      this.energyCellsRequiredForUnlock > 0 &&
-      this.collectedEnergyCells >= this.energyCellsRequiredForUnlock;
-
-    this.updateControllerExitVisualState(dt);
-  }
-
-
-  /*
-  Purpose : updateEnergyUnlockRequirement is a method that calculates the number of energy cells required to unlock the controller exit in the dungeon based on the total number of energy cells in the world 
-  and a predefined fraction that determines the unlock requirement.
   
-  Parameters: none, but it uses the totalEnergyCells property of the world to calculate the energyCellsRequiredForUnlock based on the unlockRequirementFraction. 
-  */
-  updateEnergyUnlockRequirement() {
-    
-    this.energyCellsRequiredForUnlock = Math.ceil(
-      this.totalEnergyCells * this.unlockRequirementFraction
-    );
-  }
-
-  
-  /*
-  Purpose : isPlayerAtUnlockedControllerExit is a method that checks if the main character (player) is within a certain activation radius of the controller exit 
-  in the dungeon and if the exit is unlocked, which would allow the player to win the game by reaching the exit after collecting enough energy cells to unlock it. 
-  This method is used to determine if the player has successfully reached the win condition of the game by activating the controller exit after unlocking it.
-  
-  parameters: none, but it uses the main_character's position
-  */
-  isPlayerAtUnlockedControllerExit() {
-    
-    if (
-      !this.main_character ||
-      !this.controllerExit ||
-      !this.controllerExitUnlocked
-    ) {
-      
-      return false;
-    }
-
-    return (
-      this.main_character.position.distanceTo(this.controllerExit.position) <=
-      this.controllerExitActivationRadius
-    );
-  }
-
   /*
   Purpose: findClosestWalkableRow is a method that takes in a tile map, a preferred row index, and a side ('left' or 'right'), 
   and searches for the closest walkable row to the preferred row on the specified side of the map.
@@ -993,523 +785,6 @@ Purpose: updateLoadingIndicator is a method that updates the loading indicator d
   }
 }
 
-
-/*
-Purpose: createGameplayDrones is a method that generates a specified number of drone enemy entities in the second maze (map2) of the game world.
-Parameters:- numDrones: the number of drone enemies to create in the second maze. The method ensures that each drone is spawned at a valid location that is not too close 
-to other drones,
-*/
-createGameplayDrones(numDrones = 3) {
-  
-  this.drones = [];
-  this.modelsLoading += numDrones;
-
-  for (let i = 0; i < numDrones; i++) {
-    
-    const droneTile = this.getValidDroneSpawnTile(this.map2, this.drones);
-    const dronePosition = this.map2.localize(droneTile).clone().add(this.map2Offset);
-
-    const drone = new DroneEnemy({
-      spawnTile: droneTile,
-      homeTile: droneTile,
-      patrolMap: this.map2,
-      position: dronePosition.clone(),
-      velocity: new THREE.Vector3(0, 0, 0),
-      color: 0xffaa33,
-      scale: new THREE.Vector3(1, 1, 1),
-      topSpeed: 3.5
-    });
-
-    drone.position.y = 1;
-    drone.mesh.rotation.y = Math.random() * Math.PI * 2;
-
-    drone.initializeFSM({
-      player: this.main_character,
-      world: this
-    });
-
-    drone.setPathfinder(this.droneHierarchicalPathfinder);
-
-    this.loadDroneVisual(drone);
-    this.addDroneDetectionCircle(drone);
-
-    this.drones.push(drone);
-    this.addEntityToWorld(drone);
-  }
-}
-
-
-/*
-Purpose: getValidDroneSpawnTile is a method that attempts to find a valid tile for spawning a drone enemy in the second maze (map2) of the game world. 
-It randomly selects walkable tiles and checks if they are at least 5 units away from any existing drones to prevent overcrowding and ensure better gameplay balance.
-parameters:- map: the tile map (map2) in which to find a valid spawn tile for the drone.
-- existingDrones: an array of existing drone entities that have already been spawned in the maze, used to check for proximity and ensure new drones do not spawn too close to them. 
-*/
-getValidDroneSpawnTile(map, existingDrones = []) {
-  
-  let spawnTile;
-  let spawnPosition;
-  let tries = 0;
-
-  do {
-    spawnTile = map.getRandomWalkableTile();
-    spawnPosition = map.localize(spawnTile);
-    tries++;
-  } while (
-    tries < 300 &&
-    (
-      existingDrones.some((drone) => {
-        const droneLocalPos = drone.position.clone().sub(this.map2Offset);
-        return droneLocalPos.distanceTo(spawnPosition) < 5;
-      })
-    )
-  );
-
-  return spawnTile;
-}
-
-/*
-Purpose: loadDroneVisual is a method that takes a drone enemy entity as a parameter and loads its 3D model asynchronously using GLTFLoader. 
-Once the model is loaded, it applies the model to the drone's mesh and sets up any animations if they are present in the GLTF file. 
-
-Parameters:- drone: the drone enemy entity for which the visual model is being loaded. The method also handles loading errors by setting a flag on the drone.
-*/
-loadDroneVisual(drone) {
-  
-  const loader = new GLTFLoader();
-
-  loader.load(
-    '/animated_drone/scene.gltf',
-    (gltf) => {
-      drone.applyDroneModel(gltf, this.mixers);
-
-      // attach detection circle AFTER model is applied
-      if (drone._pendingDetectionCircle) {
-        drone.mesh.add(drone._pendingDetectionCircle);
-        drone.detectionCircle = drone._pendingDetectionCircle;
-        drone._pendingDetectionCircle = null;
-      }
-
-      this.modelsLoaded++;
-      this.updateLoadingIndicator();
-    },
-    undefined,
-    () => {
-      drone.handleLoadError();
-
-      // still attach circle even if model fails
-      if (drone._pendingDetectionCircle) {
-        drone.mesh.add(drone._pendingDetectionCircle);
-        drone.detectionCircle = drone._pendingDetectionCircle;
-        drone._pendingDetectionCircle = null;
-      }
-
-      this.modelsLoaded++;
-      this.updateLoadingIndicator();
-    }
-  );
-}
-
-/*
-Purpose: addDroneDetectionCircle is a method that creates a circular mesh to visually represent the detection range of a drone enemy in the game world.
-parameters:- drone: the drone enemy entity for which the detection circle is being created. The method calculates the radius of the circle based on the drone's detectRange
-*/
-addDroneDetectionCircle(drone) {
-  
-  const radius = drone.detectRange ?? drone.detectionRange ?? 6;
-  const geometry = new THREE.CircleGeometry(radius, 64);
-
-  const material = new THREE.MeshBasicMaterial({
-    color: 0x66e0ff,      // bluish default
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.25,        
-    depthWrite: false
-  });
-
-  const circle = new THREE.Mesh(geometry, material);
-  circle.rotation.x = -Math.PI / 2;
-  circle.position.y = 0.05;
-  circle.renderOrder = 999;
-
-  drone._pendingDetectionCircle = circle;
-}
-
-  // create 10 ground attackers in the first maze (for vector pathfinding testing)
-  /*
-  purpose: createGroundAttackers is a method that generates a specified number of ground attacker entities in the first maze of the game world. 
-  Each attacker is represented by a 3D model of a sphere robot, which is loaded asynchronously using GLTFLoader. The attackers are placed at random walkable tiles in the maze, 
-  with checks to ensure they are not too close to the player start position, the door goal, or each other to prevent overcrowding and ensure a more balanced gameplay experience. 
-  Each attacker has properties to track whether their model has loaded successfully and to handle any loading errors, as well as an animation mixer if the model includes animations. This method also updates a loading indicator to show overall progress of attacker model loading.
-  
-  parameters:
-- numAttackers: the number of ground attackers to create (default is 10)
-  */
-  createGroundAttackers(numAttackers = 10) {
-  this.ground_attackers = [];
-  this.modelsLoading += numAttackers;
-
-  for (let i = 0; i < numAttackers; i++) {
-    
-    let attackerTile;
-    let attackerPosition;
-    let tries = 0;
-
-    do {
-      attackerTile = this.map.getRandomWalkableTile();
-      attackerPosition = this.map.localize(attackerTile);
-      tries++;
-    } while (
-      tries < 300 &&
-      (
-        attackerPosition.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
-        attackerPosition.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
-        this.ground_attackers.some(a => a.position.distanceTo(attackerPosition) < 5)
-      )
-    );
-
-    let attacker = new DynamicEntity({
-      position: attackerPosition.clone(),
-      velocity: new THREE.Vector3(0, 0, 0),
-      color: 0x660000,
-      scale: new THREE.Vector3(1, 0.75, 1)
-    });
-
-    attacker.boatLoaded = false;
-    attacker.position.y = 1;
-    attacker.modelFacingOffset = 0;
-
-    const loader = new GLTFLoader();
-    loader.load(
-      '/sphere_robot/scene.gltf',
-      (gltf) => {
-        const model = gltf.scene;
-
-        while (attacker.mesh.children.length > 0) {
-          attacker.mesh.remove(attacker.mesh.children[0]);
-        }
-
-        model.scale.set(2.2, 2.2, 2.2);
-
-        const box = new THREE.Box3().setFromObject(model);
-        model.position.y = -box.min.y;
-        model.rotation.y = 0;
-
-        attacker.mesh.add(model);
-        attacker.robotModel = model;
-        attacker.boatLoaded = true;
-
-        if (gltf.animations && gltf.animations.length > 0) {
-          
-          const mixer = new THREE.AnimationMixer(model);
-          const action = mixer.clipAction(gltf.animations[0]);
-          action.play();
-          attacker.mixer = mixer;
-          this.mixers.push(mixer);
-        
-        }
-
-        this.modelsLoaded++;
-        this.updateLoadingIndicator();
-      },
-      undefined,
-      (error) => {
-        attacker.boatLoaded = true;
-        attacker.loadError = true;
-        this.modelsLoaded++;
-        this.updateLoadingIndicator();
-      }
-    );
-
-    this.ground_attackers.push(attacker);
-    this.addEntityToWorld(attacker);
-  }
-}
-
-  // create npcs with visual loading feedback
-  /*
-  purpose: createNPCs is a method that generates a specified number of NPC entities in the game world, 
-  each with visual feedback to indicate that their boat model is loading. 
-
-parameters:
-- numNPCs: the number of NPCs to create (default is 10)
-Each NPC is initially represented by a temporary orange cube with a spinning yellow cone above it to indicate loading. Once the boat model is successfully loaded, 
-the temporary visuals are removed and replaced with the actual boat model. 
-If there is an error during loading, the cube turns red to indicate the failure. This method also updates a loading indicator to show overall progress of NPC model loading.
-  */
-  createNPCs(numNPCs = 10) {
-    
-    this.modelsLoading += numNPCs;
-
-    for (let i = 0; i < numNPCs; i++) {
-      
-      let randomTile =
-        this.map.walkableTiles[
-          Math.floor(Math.random() * this.map.walkableTiles.length)
-        ];
-      
-        let position = this.map.localize(randomTile);
-
-      // Create NPC entity with a temporary loading cube
-      let npc = new DynamicEntity({
-        position: position,
-        velocity: new THREE.Vector3(0, 0, 0),
-        color: 0xffaa33, // Orange color for loading
-        scale: new THREE.Vector3(1, 1, 1)
-      });
-
-      // Set initial rotation to face a random direction
-      npc.mesh.rotation.y = Math.random() * Math.PI * 2;
-
-      // Add a flag to indicate if boat is loaded
-      npc.boatLoaded = false;
-
-      // Add a temporary cube that shows it's loading
-      const tempGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-      const tempMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffaa33,
-        emissive: 0x442200,
-        transparent: true,
-        opacity: 0.7
-      });
-      
-      const tempCube = new THREE.Mesh(tempGeometry, tempMaterial);
-      tempCube.position.set(0, 0.75, 0);
-      npc.mesh.add(tempCube);
-
-      // Add a spinning indicator
-      const indicatorGeo = new THREE.ConeGeometry(0.3, 0.8, 8);
-      const indicatorMat = new THREE.MeshStandardMaterial({
-        color: 0xffff00
-      });
-      
-      const indicator = new THREE.Mesh(indicatorGeo, indicatorMat);
-      indicator.position.set(0, 1.8, 0);
-      indicator.userData = { spinSpeed: 0.1 };
-      npc.mesh.add(indicator);
-      npc.loadingIndicator = indicator;
-
-      // Load boat model
-      const loader = new GLTFLoader();
-      loader.load(
-        '/animated_drone/scene.gltf',
-        (gltf) => {
-          const model = gltf.scene;
-          console.log('Boat model loaded:', gltf.scene);
-
-          const currentRotation = npc.mesh.rotation.y;
-
-          // Remove temporary loading visuals
-          while (npc.mesh.children.length > 0) {
-            npc.mesh.remove(npc.mesh.children[0]);
-          }
-
-          // Scale and position the boat
-          model.scale.set(10, 10, 10);
-          model.position.set(0, -0.5, 0);
-
-          // Center the boat on ground
-          const box = new THREE.Box3().setFromObject(model);
-          model.position.y = -box.min.y;
-
-          model.userData.forwardAxis = 'x';
-
-          // Add the boat model WITHOUT rotating it first
-          npc.mesh.add(model);
-
-          // Store reference to the boat model for rotation calculations
-          npc.boatModel = model;
-
-          // Mark boat as loaded
-          npc.boatLoaded = true;
-
-          // Update color to final color
-          npc.color = 0xff3333;
-
-          // Restore the rotation we had
-          npc.mesh.rotation.y = currentRotation;
-
-          // Handle animations
-          if (gltf.animations && gltf.animations.length > 0) {
-            const mixer = new THREE.AnimationMixer(model);
-            const action = mixer.clipAction(gltf.animations[0]);
-            action.play();
-            npc.mixer = mixer;
-            this.mixers.push(mixer);
-          }
-
-          // Track loading progress
-          this.modelsLoaded++;
-
-          // Update loading indicator
-          this.updateLoadingIndicator();
-        },
-        (progress) => {
-          // Optional: show per-NPC progress
-        },
-        (error) => {
-          // Make the loading cube red to show error
-          if (npc.mesh.children[0]) {
-            npc.mesh.children[0].material.color.setHex(0xff0000);
-          }
-
-          // Mark as loaded (with error) so it can be considered for movement if needed
-          npc.boatLoaded = true;
-          npc.loadError = true;
-
-          this.modelsLoaded++;
-          this.updateLoadingIndicator();
-        }
-      );
-
-      this.npcs.push(npc);
-      this.addEntityToWorld(npc);
-    }
-  }
-
-
-  // create energy cells in the first maze
-  createEnergyCells(numCells = 5) {
-    
-  this.spawnEnergyCells(this.map, new THREE.Vector3(0, 0, 0), numCells);
-  
-}
-
-  // create energy cells for a specific map with offset (for second maze)
-  createEnergyCellsForMap(map, offset, numCells = 5) {
-    
-    this.spawnEnergyCells(map, offset, numCells);
-  }
-
-  // Spawn energy cells in a given map with offset, ensuring they are placed on valid tiles
-  /*
-  purpose: spawn energy cells in a specified map with a positional offset, ensuring that they are placed on valid tiles that are walkable, 
-  not occupied by other energy cells, and not on the player's current tile.
-
-  parameters:
-- map: the map in which to spawn energy cells
-- offset: the positional offset to apply when placing energy cells (used for second maze)
-- numCells: the number of energy cells to spawn (default is 5)
-  */
-  spawnEnergyCells(map, offset, numCells = 5) {
-    
-    let createdCount = 0;
-    let attempts = 0;
-    const maxAttempts = 1000;
-
-    while (createdCount < numCells && attempts < maxAttempts) {
-      attempts++;
-
-      const randomTile =
-        map.walkableTiles[Math.floor(Math.random() * map.walkableTiles.length)];
-
-      if (!this.isValidEnergyCellTile(map, randomTile, offset)) {
-        continue;
-      }
-
-      const cell = new EnergyCell({
-        
-        tile: randomTile,
-        map,
-        offset,
-        position: map.localize(randomTile).clone().add(offset)
-      
-      });
-
-      this.energyCells.push(cell);
-      this.totalEnergyCells++;
-      this.scene.add(cell.mesh);
-      createdCount++;
-    }
-  }
-
-  // Check if a tile is valid for placing an energy cell (walkable, not occupied, not on player)
-  /*
-  Purpose: determine if a given tile is suitable for placing an energy cell by checking if it's walkable, not already occupied by another energy cell, 
-  and not the player's current tile.
-  
-  parameters:
-- map: the map to check against
-- tile: the tile being evaluated for energy cell placement
-- offset: the positional offset to apply when checking against the player's position (used for second maze)
-
-  */
-  isValidEnergyCellTile(map, tile, offset) {
-    
-    if (!tile || !tile.isWalkable()) {
-      
-      return false;
-    
-    }
-
-    const occupied = this.energyCells.some(
-      
-      (cell) =>
-        cell.map === map &&
-        cell.tile.row === tile.row &&
-        cell.tile.col === tile.col
-    
-      );
-
-    if (occupied) {
-      
-      return false;
-    
-    }
-
-    if (!this.main_character || map !== this.map) {
-      
-      return true;
-    
-    }
-
-    const playerTile = map.quantize(
-      
-      this.main_character.position.clone().sub(offset)
-    
-    );
-
-    return !(playerTile.row === tile.row && playerTile.col === tile.col);
-  }
-
-  
-  // Update energy cells - check for collection and update state
-  /*
-  * purpose: update the state of energy cells and check for collection by the main character.
-  * approach: iterate through each energy cell, update its state, and check if it has been collected.
-  */
-  updateEnergyCells(dt) {
-    
-    if (!this.main_character || this.energyCells.length === 0) {
-      
-      return;
-    
-    }
-
-    for (let cell of this.energyCells) {
-      
-      if (cell.collected) {
-        
-        continue;
-
-      }
-
-      cell.update(dt);
-
-      if (
-        
-        this.main_character.position.distanceTo(cell.position) <=
-        this.energyCellCollectionRadius
-      
-      ) {
-        
-        cell.collect();
-        this.collectedEnergyCells++;
-      
-      }
-    }
-  }
-
   // Add an entity to the world
   /*
   * purpose: add an entity to the game world and manage its lifecycle.
@@ -1523,201 +798,8 @@ If there is an error during loading, the cube turns red to indicate the failure.
   
   }
 
-  // ----- Movement and animation methods (steering based) -----
-  /*
-  purpose: when a ground attacker is "defeated", respawn it at a valid location in the first maze after a cooldown. 
-  This involves finding a new spawn tile that is not too close to the player, the door goal, or other attackers, and resetting the attacker's position and state.
   
-  approach: use getRandomWalkableTile to find a new spawn location in the first maze that is not too close to the player, door goal, or other attackers, 
-  then reset the attacker's position, velocity, and acceleration.
-  
-  */
-  respawnGroundAttacker(npc) {
-  
-    let spawnTile;
-    let spawnPos;
-    let tries = 0;
 
-    do {
-      spawnTile = this.map.getRandomWalkableTile();
-      spawnPos = this.map.localize(spawnTile);
-      tries++;
-    } while (
-      tries < 300 &&
-      (
-      
-        spawnPos.distanceTo(new THREE.Vector3(0, 0, 0)) < 6 ||
-        spawnPos.distanceTo(this.map.localize(this.doorGoal)) < 6 ||
-        this.ground_attackers.some(a =>
-        a !== npc && a.position.distanceTo(spawnPos) < 5
-      )
-    )
-  );
-
-  npc.position.copy(spawnPos);
-  npc.position.y = 1;
-
-  npc.velocity.set(0, 0, 0);
-  if (npc.acceleration) npc.acceleration.set(0, 0, 0);
-}
-
-  
- /*
- purpose: when a drone is "defeated", respawn it at a valid location in maze 2 after a cooldown. This involves finding a new spawn tile that is not too close to other drones, 
- and resetting the drone's position and state.
- 
-  approach: use getValidDroneSpawnTile to find a new spawn location in maze 2 that is not too close to existing drones, then reset the drone's position, 
-  spawn tile, home tile, and patrol map.
-  
-  */
-  respawnDrone(npc) {
-  
-    const spawnTile = this.getValidDroneSpawnTile(
-    this.map2,
-    this.drones.filter((drone) => drone !== npc)
-  
-  );
-
-  const spawnPos = this.map2.localize(spawnTile).clone().add(this.map2Offset);
-  npc.spawnTile = spawnTile;
-  npc.homeTile = spawnTile;
-  npc.patrolMap = this.map2;
-  npc.resetToSpawn(spawnPos);
-}
-
- 
-/*
-purpose: when a drone is "defeated", start a respawn cooldown by hiding it and resetting its position, then after the cooldown it will be respawned at a valid location 
-in maze 2. This gives a visual feedback of defeat and prevents immediate respawn on top of the player.
-
-approach: set a respawn timer on the npc, reset its velocity and acceleration, hide its mesh, and move it below the ground. The main update loop will check the respawn timer
- and call respawnDrone when it reaches 0.
-
- npc -> null
-*/
-  startDroneRespawnCooldown(npc) {
-    
-    npc.respawnTimer = this.groundAttackerRespawnDelay;
-    npc.velocity.set(0, 0, 0);
-    
-    if (npc.acceleration) {
-      npc.acceleration.set(0, 0, 0);
-    }
-
-    npc.mesh.visible = false;
-    npc.position.y = -100;
-  
-  }
-
-  // Update main character movement using steering behaviours
-  /*
-*purpose: compute a steering force based on player input to move the main character, and handle jumping physics. Also switch between idle and walk animations based on movement.
-
-*approach: calculate desired velocity from input, compute steering force as the difference between desired and current velocity, apply it to the character,
- and handle jump initiation and physics. For animation, check if the character is moving and crossfade between idle and walk animations.
-
- *timeStep -> null
-*/
-  updateMainCharacter(dt) {
-    
-    const input = this.inputHandler;
-    
-    if (!input) return;
-
-    // Compute desired movement direction in world space
-    let desiredVelocity = input.getForce(this.moveSpeed);
-
-    // Steering force = (desired - current) clamped to maxForce
-    const currentVel = this.main_character.velocity;
-    const steering = desiredVelocity.clone().sub(currentVel);
-    steering.clampLength(0, this.maxForce);
-
-    // Apply the steering force to the character
-    this.main_character.applyForce(steering);
-
-    // Start jump when space is pressed
-    if (input.keys.space && !this.isJumping) {
-      
-      this.isJumping = true;
-      this.jumpVelocity = this.jumpStrength;
-    
-    }
-
-    // Apply jump physics
-    if (this.isJumping) {
-      
-      this.main_character.position.y += this.jumpVelocity * dt;
-      this.jumpVelocity -= this.gravity * dt;
-
-      if (this.main_character.position.y <= this.groundY) {
-        
-        this.main_character.position.y = this.groundY;
-        this.jumpVelocity = 0;
-        this.isJumping = false;
-      
-      }
-    }
-
-    // Debug logging (once per second)
-    if (!this.logCounter) this.logCounter = 0;
-    
-    this.logCounter++;
-    
-    if (this.logCounter >= 60) {
-      
-      this.logCounter = 0;
-    }
-
-    // Animation switching based on speed
-    const isMoving = desiredVelocity.length() > 0.1;
-    
-    if (isMoving) {
-      
-      const walkAction = this.mainCharacterActions[3];
-      const idleAction = this.mainCharacterActions[0];
-      
-      if (walkAction && this.currentMainAction !== walkAction) {
-        
-        if (idleAction) idleAction.fadeOut(0.2);
-        walkAction.reset().fadeIn(0.2).play();
-        this.currentMainAction = walkAction;
-      }
-    
-    } else {
-      
-      const idleAction = this.mainCharacterActions[0];
-      const walkAction = this.mainCharacterActions[1];
-      
-      if (idleAction && this.currentMainAction !== idleAction) {
-        
-        if (walkAction) walkAction.fadeOut(0.2);
-        
-        idleAction.reset().fadeIn(0.2).play();
-        this.currentMainAction = idleAction;
-      
-      }
-    }
-}
-
-/*
-purpose : update the camera to follow the main character 
-approach: smoothly interpolate the camera position to a point above and behind the character, and look slightly ahead of the character for better visibility
-null -> null
-*/
-updateCameraFollow() {
-  
-  if (!this.main_character) return;
-  const target = this.main_character.position.clone();
-
-  // higher + a bit farther back so drones are easier to see
-  const desiredPosition = target.clone().add(new THREE.Vector3(0, 24, 14));
-
-  this.camera.position.lerp(desiredPosition, 0.08);
-
-  // look slightly ahead instead of directly at player feet
-  this.camera.lookAt(target.x, target.y + 2, target.z);
-
-}
 
 // for maze 2 position update
 /*
@@ -1904,473 +986,6 @@ snapEntityToWalkableTile(entity) {
   }
 }
 
-// add wander behaviour for ground attacker
-
-/*
-*purpose: update the position of ground attackers by keeping them on the ground, preventing them from escaping to maze 2, and 
-adding simple wander/chase/avoid behaviours based on the player's position
-
-*approach: for each ground attacker, first clamp their y position to keep them on the ground. Then check if they have reached the door goal tile - if so, respawn them. 
-Next, run the vector field pathfinding to update their path to the door goal. Finally, clamp their position within the bounds of maze 1 and 
-snap them to walkable tiles to prevent them from escaping into maze 2.
-
-*@returns null
-*/
-updateGroundAttackers() {
-  
-  if (!this.ground_attackers || this.ground_attackers.length === 0) return;
-  
-  if (!this.doorGoal || !this.groundVectorPathFinding) return;
-
-  for (let npc of this.ground_attackers) {
-    
-    npc.position.y = 1;
-    if (npc.velocity) npc.velocity.y = 0;
-    
-    if (npc.acceleration) npc.acceleration.y = 0;
-
-    const currentTile = this.map.quantize(npc.position);
-
-    // respawn as soon as attacker reaches the goal tile
-    if (
-      currentTile &&
-      currentTile.row === this.doorGoal.row &&
-      currentTile.col === this.doorGoal.col
-    ) {
-      this.respawnGroundAttacker(npc);
-      continue;
-    }
-  }
-
-  this.groundVectorPathFinding.runVectorFieldPathFinding(this.doorGoal);
-
-  const minX = this.map.minX + 1;
-  const maxX = this.map.minX + this.map.cols * this.map.tileSize - 1;
-  const minZ = this.map.minZ + 1;
-  const maxZ = this.map.minZ + this.map.rows * this.map.tileSize - 1;
-
-  for (let npc of this.ground_attackers) {
-    
-    npc.position.x = THREE.MathUtils.clamp(npc.position.x, minX, maxX);
-    npc.position.z = THREE.MathUtils.clamp(npc.position.z, minZ, maxZ);
-    this.snapEntityToWalkableTile(npc);
-    npc.position.y = 1;
-  
-  }
-}
-
-// Update FSM-driven drone gameplay behaviour.
-/*
-*purpose: update the position and state of drones in the world
-*approach: for each drone, update its position and state based on the finite state machine, and clamp its position within the bounds of maze 2
-*@param {number} dt - the time step for the update
-*@returns null
-*/
-updateDrones(dt) {
-  
-  if (!this.drones || this.drones.length === 0) return;
-
-  for (let drone of this.drones) {
-    
-    if (drone.respawnTimer > 0) {
-      
-      drone.respawnTimer -= dt;
-
-      if (drone.respawnTimer <= 0) {
-        
-        this.respawnDrone(drone);
-      
-      }
-
-      continue;
-    }
-
-    drone.position.y = 1;
-    
-    if (drone.velocity) drone.velocity.y = 0;
-    
-    if (drone.acceleration) drone.acceleration.y = 0;
-
-    drone.updateFSM(dt, {
-      player: this.main_character,
-      world: this
-    });
-  }
-
-  const minX = this.map2Offset.x + this.map2.minX + 1;
-  const maxX = this.map2Offset.x + this.map2.minX + this.map2.cols * this.map2.tileSize - 1;
-  const minZ = this.map2.minZ + 1;
-  const maxZ = this.map2.minZ + this.map2.rows * this.map2.tileSize - 1;
-
-  for (let drone of this.drones) {
-    
-    if (drone.respawnTimer > 0) continue;
-
-    drone.position.x = THREE.MathUtils.clamp(drone.position.x, minX, maxX);
-    drone.position.z = THREE.MathUtils.clamp(drone.position.z, minZ, maxZ);
-
-    let localPos = drone.position.clone().sub(this.map2Offset);
-    let tile = this.map2.quantize(localPos);
-
-    if (!tile || !tile.isWalkable()) {
-      let bestTile = null;
-      let bestDist = Infinity;
-
-      for (let walkable of this.map2.walkableTiles) {
-        let safePos = this.map2.localize(walkable).clone().add(this.map2Offset);
-        let dist = safePos.distanceTo(drone.position);
-
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestTile = walkable;
-        }
-      }
-
-      if (bestTile) {
-        let correctedPos = this.map2.localize(bestTile).clone().add(this.map2Offset);
-        drone.position.x = correctedPos.x;
-        drone.position.z = correctedPos.z;
-        drone.velocity.set(0, 0, 0);
-        
-        if (drone.acceleration) drone.acceleration.set(0, 0, 0);
-      
-      }
-    }
-
-    drone.position.y = 1;
-  }
-}
-
-// helper function to create partol loop 
-/*
-*purpose: create a patrol loop for the dungeon guard in dungeon 3 by finding walkable anchor points near the corners of the dungeon,
- and using JPS pathfinding to connect them into a loop. 
-*The resulting patrol path is stored in this.dungeonPatrolPath, and can be visualized with drawDungeon3PatrolLoop
-*@returns null
-*/
-createPatrolLoopInDungeon3() {
-  
-  if (!this.dungeonMap.walkableTiles || this.dungeonMap.walkableTiles.length === 0) {
-    this.dungeonMap.walkableTiles =
-      this.dungeonMap.grid.flat().filter(t => t.isWalkable());
-  }
-
-  const nearestWalkable = (r, c) => {
-    let best = null;
-    let bestDist = Infinity;
-
-    for (let t of this.dungeonMap.walkableTiles) {
-      
-      let d = Math.abs(t.row - r) + Math.abs(t.col - c);
-      
-      if (d < bestDist) {
-        bestDist = d;
-        best = t;
-      }
-    }
-    return best;
-  };
-
-  const anchors = [
-    nearestWalkable(2, 2),
-    nearestWalkable(2, this.dungeonMap.cols - 3),
-    nearestWalkable(this.dungeonMap.rows - 3, this.dungeonMap.cols - 3),
-    nearestWalkable(this.dungeonMap.rows - 3, 2)
-  ].filter(Boolean);
-
-  const uniqueAnchors = [];
-  const seen = new Set();
-
-  for (let tile of anchors) {
-    
-    const key = `${tile.row},${tile.col}`;
-    
-    if (!seen.has(key)) {
-      seen.add(key);
-      uniqueAnchors.push(tile);
-    }
-  }
-
-  if (uniqueAnchors.length < 2) {
-    this.dungeonPatrolTiles = [];
-    this.dungeonPatrolPath = [];
-    return;
-  }
-
-  const pathfinder = new JPS(this.dungeonMap);
-
-  this.dungeonPatrolTiles = [];
-
-  for (let i = 0; i < uniqueAnchors.length; i++) {
-    
-    const start = uniqueAnchors[i];
-    const goal = uniqueAnchors[(i + 1) % uniqueAnchors.length];
-
-    let segment = pathfinder.findPath(start, goal);
-
-    if (!segment || segment.length === 0) {
-
-      continue;
-    
-    }
-
-    if (i > 0) {
-
-      segment.shift();
-    
-    }
-
-    this.dungeonPatrolTiles.push(...segment);
-  }
-
-  if (!this.dungeonPatrolTiles || this.dungeonPatrolTiles.length < 2) {
-    
-    this.dungeonPatrolPath = [];
-    return;
-  
-  }
-
-  this.dungeonPatrolPath = this.dungeonPatrolTiles.map(tile =>
-  this.dungeonMap.localize(tile).clone().add(this.dungeonOffset)
-  
-);
-}
-
-// helper function to visualize the patrol loop in dungeon 3
-/*
-*purpose: visualize the patrol loop for the dungeon guard in dungeon 3 by creating a THREE.LineLoop object that connects the points in this.dungeonPatrolPath. 
-*The line is added to the scene and stored in this.dungeonPatrolLine for later removal if needed.
-*@returns null
-*/
-drawDungeon3PatrolLoop() {
-  
-  if (!this.dungeonPatrolPath || this.dungeonPatrolPath.length < 2) return;
-
-  if (this.dungeonPatrolLine) {
-    
-    this.scene.remove(this.dungeonPatrolLine);
-  
-  }
-
-  const points = this.dungeonPatrolPath.map(p => new THREE.Vector3(p.x, 1.5, p.z));
-  const geometry = new THREE.BufferGeometry().setFromPoints(points);
-  const material = new THREE.LineBasicMaterial({ color: 0xffff00 });
-
-  this.dungeonPatrolLine = new THREE.LineLoop(geometry, material);
-  this.scene.add(this.dungeonPatrolLine);
-
-}
-
-// create dungeon guard patrol loop in dungeon 3
-/**purpose: create a dungeon guard entity in dungeon 3 that patrols along the path defined by this.dungeonPatrolPath. 
-*The guard is represented as a DynamicEntity with a GLTF model, and has properties for chasing the player when they are within a certain radius. 
-*The guard's update method will use steering behaviors to either follow the patrol path or pursue the player based on their distance.
-*@returns null
-*/
-createDungeonGuard() {
-  
-  if (!this.dungeonPatrolPath || this.dungeonPatrolPath.length < 2) {
-    
-    return;
-  
-  }
-
-  const spawnIndex = Math.floor(this.dungeonPatrolPath.length / 2);
-  const startPos = this.dungeonPatrolPath[spawnIndex].clone();
-
-  this.dungeonGuard = new DynamicEntity({
-    position: new THREE.Vector3(startPos.x, 1.0, startPos.z),
-    velocity: new THREE.Vector3(0, 0, 0),
-    topSpeed: 4.4,
-    color: 0xff0000,
-    scale: new THREE.Vector3(1, 1, 1)
-  });
-
-  this.dungeonGuard.isDungeonGuard = true;
-  this.dungeonGuard.maxForce = 8.0;
-
-  this.dungeonGuard.pathFollower = {
-    path: this.dungeonPatrolPath,
-    segmentIndex: spawnIndex,
-    pathRadius: 0.25,
-    predictDistance: 0.15,
-    targetOffset: 0.08
-  };
-
-  this.dungeonGuard.modelFacingOffset = 0;
-  this.dungeonGuard.detectRadius = 12;
-  this.dungeonGuard.catchRadius = 1.5;
-  this.dungeonGuard.isChasing = false;
-  this.dungeonGuard.lookAhead = 0.6;
-
-  const tempBody = new THREE.Mesh(
-    new THREE.BoxGeometry(1.2, 2.0, 1.2),
-    new THREE.MeshStandardMaterial({
-      color: 0xff0000,
-      emissive: 0x330000
-    })
-  );
-  tempBody.position.set(0, 1.0, 0);
-  this.dungeonGuard.mesh.add(tempBody);
-  this.dungeonGuard.tempBody = tempBody;
-
-  const loader = new GLTFLoader();
-  loader.load(
-    '/walking_mario/scene.gltf',
-    (gltf) => {
-      const model = gltf.scene;
-
-      if (this.dungeonGuard.tempBody) {
-        this.dungeonGuard.mesh.remove(this.dungeonGuard.tempBody);
-        this.dungeonGuard.tempBody.geometry.dispose();
-        this.dungeonGuard.tempBody.material.dispose();
-        this.dungeonGuard.tempBody = null;
-      }
-
-      while (this.dungeonGuard.mesh.children.length > 0) {
-        this.dungeonGuard.mesh.remove(this.dungeonGuard.mesh.children[0]);
-      }
-
-      model.scale.set(0.015, 0.015, 0.015);
-
-      const box = new THREE.Box3().setFromObject(model);
-      model.position.y = -box.min.y;
-      model.rotation.y = 0;
-
-      this.dungeonGuard.mesh.add(model);
-      this.dungeonGuard.guardModel = model;
-
-      if (gltf.animations && gltf.animations.length > 0) {
-        
-        const mixer = new THREE.AnimationMixer(model);
-        this.dungeonGuard.mixer = mixer;
-        this.mixers.push(mixer);
-
-        const clipIndex = gltf.animations[1] ? 1 : 0;
-        const action = mixer.clipAction(gltf.animations[clipIndex]);
-        action.reset();
-        action.setEffectiveTimeScale(0.35);
-        action.play();
-
-        this.dungeonGuard.currentAction = action;
-
-      } 
-    },
-    undefined,
-    (error) => {
-    }
-  );
-
-  this.addEntityToWorld(this.dungeonGuard);
-
-}
-
-// Update the dungeon guard's movement and chasing behaviour in dungeon 3
-/*
-*purpose: update the position and behavior of the dungeon guard in dungeon 3 by using steering behaviors to either follow its patrol path or pursue the player when they are within a certain radius. 
-*The guard will also be clamped within the bounds of the dungeon and will snap to walkable tiles to prevent it from escaping into the hallway.
-*@param {number} dt - the time step for the update
-*@returns null
-*/
-updateDungeonGuard(dt) {
-  
-  if (!this.dungeonGuard) return;
-  if (!this.dungeonGuard.pathFollower) return;
-  if (!this.main_character) return;
-
-  const pf = this.dungeonGuard.pathFollower;
-  const path = pf.path;
-
-  if (!path || path.length < 2) return;
-
-  const toPlayer = this.main_character.position.clone().sub(this.dungeonGuard.position);
-  toPlayer.y = 0;
-  const playerDistance = toPlayer.length();
-
-  this.dungeonGuard.isChasing = playerDistance <= this.dungeonGuard.detectRadius;
-
-  let steering;
-
-  if (this.dungeonGuard.isChasing) {
-    steering = SteeringBehaviours.pursue(
-      this.dungeonGuard,
-      this.main_character,
-      this.dungeonGuard.lookAhead
-    );
-  } else {
-    steering = ReynoldsPathFollowing.followLoop(this.dungeonGuard);
-  }
-
-  steering.clampLength(0, this.dungeonGuard.maxForce);
-  this.dungeonGuard.applyForce(steering);
-
-  const dungeonAdapter = {
-    handleCollisions: (entity) => {
-      const fakeEntity = {
-        ...entity,
-        position: entity.position.clone().sub(this.dungeonOffset)
-      };
-
-      const corrected = this.dungeonMap.handleCollisions(fakeEntity);
-      
-      return corrected.add(this.dungeonOffset);
-    
-    }
-  };
-
-  this.dungeonGuard.update(dt, dungeonAdapter);
-  this.dungeonGuard.position.y = 1.0;
-  this.dungeonGuard.velocity.y = 0;
-  this.dungeonGuard.velocity.clampLength(0, this.dungeonGuard.topSpeed);
-
-  let facingDir = new THREE.Vector3();
-
-  if (this.dungeonGuard.isChasing) {
-    
-    facingDir = this.main_character.position.clone().sub(this.dungeonGuard.position);
-    facingDir.y = 0;
-  
-  } else {
-    
-    const a = path[pf.segmentIndex % path.length];
-    const b = path[(pf.segmentIndex + 1) % path.length];
-    const ab = b.clone().sub(a);
-    const abLenSq = ab.lengthSq();
-
-    if (abLenSq > 0) {
-      const ap = this.dungeonGuard.position.clone().sub(a);
-      let t = ap.dot(ab) / abLenSq;
-      t = THREE.MathUtils.clamp(t, 0, 1);
-
-      const closestPoint = a.clone().add(ab.clone().multiplyScalar(t));
-      const offsetFromPath = this.dungeonGuard.position.clone().sub(closestPoint);
-      offsetFromPath.y = 0;
-
-      const maxDrift = pf.pathRadius ?? 0.25;
-
-      if (offsetFromPath.length() > maxDrift) {
-        const correctedPos = closestPoint.clone();
-        correctedPos.y = 1.0;
-        this.dungeonGuard.position.lerp(correctedPos, 0.2);
-
-        this.dungeonGuard.velocity.multiplyScalar(0.5);
-        this.dungeonGuard.velocity.y = 0;
-        this.dungeonGuard.velocity.clampLength(0, this.dungeonGuard.topSpeed);
-      }
-    }
-
-    facingDir = b.clone().sub(a);
-    facingDir.y = 0;
-  }
-
-  if (facingDir.lengthSq() > 0.0001) {
-    facingDir.normalize();
-
-    const moveAngle = Math.atan2(facingDir.x, facingDir.z);
-    const facingOffset = this.dungeonGuard.modelFacingOffset ?? 0;
-    this.dungeonGuard.mesh.rotation.y = moveAngle + facingOffset;
-  }
-}
 
 // is player on safe tile in hallway 2 helper function
 /*
@@ -2430,6 +1045,11 @@ addExtraGreenTiles(map, count = 8) {
     tile.type = Tile.Type.EasyTerrain;
   
   }
+}
+
+// controller exit wrapper 
+isPlayerAtUnlockedControllerExit() {
+  return this.controllerExitManager.isPlayerAtUnlockedControllerExit();
 }
 
 // restart
@@ -2523,8 +1143,8 @@ reset() {
   }
 
   // Update main character movement and animation
-  this.updateMainCharacter(dt);
-  this.updateDungeonGuard(dt);
+  this.mainCharacterManager.updateMainCharacter(dt);
+  this.dungeonGuardManager.updateDungeonGuard(dt);
   // Update main character animation mixer if present
   if (this.mainCharacterMixer) {
     
@@ -2540,8 +1160,9 @@ reset() {
   }
 
   //updateGroundAttacker with new steering behaviours
-  this.updateGroundAttackers();
-  this.updateDrones(dt);
+  this.groundAttackerManager.update();
+  this.droneManager.update(dt);
+  
 
   // Update all entities (this includes the main character)
   for (let e of this.entities) {
@@ -2555,8 +1176,8 @@ reset() {
     }
   }
 
-  this.updateEnergyCells(dt);
-  this.updateControllerExitState(dt);
+  this.energyCellManager.updateEnergyCells(dt);
+  this.controllerExitManager.updateControllerExitState(dt);
 
   // keep player stable inside dungeon bounds
   if (this.main_character) {
@@ -2580,7 +1201,7 @@ reset() {
   }
 
   // Update camera to follow main character
-  this.updateCameraFollow();
+  this.mainCharacterManager.updateCameraFollow();
 
   // Final position logging (once per second)
   if (!this.finalLogCounter) this.finalLogCounter = 0;
