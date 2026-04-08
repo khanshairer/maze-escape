@@ -269,10 +269,6 @@ export class DungeonGuard {
       yaw + (this.world.dungeonGuard.modelFacingOffset || 0);
   }
 
-  if (playerDistance <= this.world.dungeonGuard.catchRadius) {
-    this.world.isGameOver = true;
-  }
-
   const minX = this.world.dungeonOffset.x + this.world.dungeonMap.minX + 0.1;
   const maxX =
     this.world.dungeonOffset.x +

@@ -1047,6 +1047,11 @@ addExtraGreenTiles(map, count = 8) {
   }
 }
 
+// controller exit wrapper 
+isPlayerAtUnlockedControllerExit() {
+  return this.controllerExitManager.isPlayerAtUnlockedControllerExit();
+}
+
 // restart
 /*
 *purpose: reset the game state to its initial conditions by clearing all entities from the scene, resetting all game variables to their default values, 
