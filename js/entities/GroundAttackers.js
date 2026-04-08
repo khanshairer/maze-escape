@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { DynamicEntity } from './DynamicEntity.js';
+import { CollisionAvoidSteering } from '../ai/steering/CollisionAvoidSteering.js';
 
 export class GroundAttackers {
   constructor(world) {
     this.world = world;
   }
 
-  create(numAttackers = 10) {
+  create(numAttackers = 8) {
     this.world.ground_attackers = [];
     this.world.modelsLoading += numAttackers;
 
@@ -145,6 +146,55 @@ export class GroundAttackers {
     }
   }
 
+  frontWhiskerPush(npc, whiskerLength = 3.0, minGap = 2.0, pushStrength = 12.0) {
+    if (!npc.velocity || npc.velocity.lengthSq() < 0.0001) {
+      return new THREE.Vector3();
+    }
+
+    const forward = npc.velocity.clone().normalize();
+    const whiskerEnd = npc.position.clone().add(forward.clone().multiplyScalar(whiskerLength));
+
+    let totalPush = new THREE.Vector3();
+    let hits = 0;
+
+    for (let other of this.world.ground_attackers) {
+      if (other === npc) continue;
+
+      const toOther = other.position.clone().sub(npc.position);
+      toOther.y = 0;
+
+      const forwardDist = toOther.dot(forward);
+
+      if (forwardDist <= 0 || forwardDist > whiskerLength) continue;
+
+      const closestPoint = CollisionAvoidSteering.getClosestPointOnSegment(
+        npc.position,
+        whiskerEnd,
+        other.position
+      );
+
+      const sideDist = closestPoint.distanceTo(other.position);
+
+      if (sideDist < minGap) {
+        const pushDir = npc.position.clone().sub(other.position);
+        pushDir.y = 0;
+
+        if (pushDir.lengthSq() > 0.0001) {
+          pushDir.normalize();
+          const strength = (1 - sideDist / minGap) * pushStrength;
+          totalPush.add(pushDir.multiplyScalar(strength));
+          hits++;
+        }
+      }
+    }
+
+    if (hits > 0) {
+      totalPush.divideScalar(hits);
+    }
+
+    return totalPush;
+  }
+
   update() {
     if (!this.world.ground_attackers || this.world.ground_attackers.length === 0) return;
     if (!this.world.doorGoal || !this.world.groundVectorPathFinding) return;
@@ -175,6 +225,13 @@ export class GroundAttackers {
     const maxZ = this.world.map.minZ + this.world.map.rows * this.world.map.tileSize - 1;
 
     for (let npc of this.world.ground_attackers) {
+      const avoidPush = this.frontWhiskerPush(npc, 3.0, 2.0, 12.0);
+
+      if (avoidPush.lengthSq() > 0.0001) {
+        avoidPush.clampLength(0, 8.0);
+        npc.applyForce(avoidPush);
+      }
+
       npc.position.x = THREE.MathUtils.clamp(npc.position.x, minX, maxX);
       npc.position.z = THREE.MathUtils.clamp(npc.position.z, minZ, maxZ);
       this.snapEntityToWalkableTile(npc);
