@@ -1,26 +1,56 @@
+/*
+
+My implementation follows the Reynolds path following framework directly.
+ It predicts a future position, projects that point onto the current path segment using scalar projection, measures the distance
+  from the predicted position to the path, and seeks a target slightly ahead when the agent deviates too far.
+
+The remaining differences are practical adjustments for a real-time game environment.
+ I use a looped path to allow continuous patrol, switch segments using a distance threshold near the end of each segment, 
+ and apply a small forward steering force even when the agent is within the path radius.
+
+These modifications are not part of the basic lecture version, but they improve smoothness, continuity, 
+and overall stability of the movement in the game.
+
+*/
+
 import * as THREE from 'three';
+/*
+Purpose : Implement Reynolds' path following behavior for agents, allowing them to follow a predefined path smoothly by 
+predicting future positions and steering towards a target point on the path.
+*/
 
 export class ReynoldsPathFollowing {
+
+  // Helper function to get a point on a looped path based on an index, allowing for continuous patrol behavior
   static getLoopPathPoint(path, index) {
     const size = path.length;
     return path[((index % size) + size) % size];
   }
 
-  static closestPointOnSegment(point, a, b) {
-    const ab = b.clone().sub(a);
-    const abLenSq = ab.lengthSq();
+  // Projects a point onto a line segment defined by points a and b ...exact reynolds style, 
+static projectPointOnSegment(point, a, b) {
+  const ap = point.clone().sub(a);
+  const ab = b.clone().sub(a);
 
-    if (abLenSq === 0) {
-      return a.clone();
-    }
+  const abLength = ab.length();
 
-    const ap = point.clone().sub(a);
-    let t = ap.dot(ab) / abLenSq;
-    t = THREE.MathUtils.clamp(t, 0, 1);
-
-    return a.clone().add(ab.multiplyScalar(t));
+  if (abLength === 0) {
+    return a.clone();
   }
 
+  const abNormalized = ab.clone().normalize();
+
+  // scalar projection
+  let scalarProj = ap.dot(abNormalized);
+
+  // clamp to segment
+  scalarProj = THREE.MathUtils.clamp(scalarProj, 0, abLength);
+
+  // vector projection (normal point)
+  return a.clone().add(abNormalized.multiplyScalar(scalarProj));
+}
+  
+// Seek behavior to steer the entity towards a target point, with clamping to max force for stability
   static seek(entity, target) {
     const desired = target.clone().sub(entity.position);
     desired.y = 0;
@@ -43,6 +73,7 @@ export class ReynoldsPathFollowing {
     return steering;
   }
 
+  // Main path following function that implements the Reynolds framework with practical adjustments for game use
   static followLoop(entity, debug = null) {
     if (!entity || !entity.pathFollower) {
       return new THREE.Vector3(0, 0, 0);
@@ -85,8 +116,8 @@ export class ReynoldsPathFollowing {
     const segIndex = pf.segmentIndex ?? 0;
     const a = this.getLoopPathPoint(path, segIndex);
     const b = this.getLoopPathPoint(path, segIndex + 1);
-
-    const normalPoint = this.closestPointOnSegment(futurePos, a, b);
+    
+    const normalPoint = this.projectPointOnSegment(futurePos, a, b);
     const segmentDir = b.clone().sub(a).normalize();
     const target = normalPoint.clone().add(
       segmentDir.multiplyScalar(targetOffset)
