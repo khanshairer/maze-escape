@@ -72,11 +72,8 @@ export class Game {
 
       const currentStateName = npc.fsm?.state?.constructor?.name;
 
-      // only dangerous in Fight / Attack / Chase state
-      const isDangerous =
-        currentStateName === "FightState" ||
-        currentStateName === "AttackState" ||
-        currentStateName === "ChaseState";
+      // Drones are only dangerous while actively chasing in the unified FSM.
+      const isDangerous = currentStateName === "ChaseState";
 
       if (!isDangerous) {
        
