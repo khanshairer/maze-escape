@@ -103,6 +103,8 @@ export class World {
   this.worldLayoutManager = new WorldLayoutManager(this);
   
   // ----- create two mazes -----
+  // Maze 1 and Maze 2 use the TileMap DFS/backtracking generator.
+  // The dungeon starts from the same tile grid, then gets replaced with BSP room generation below.
   this.map = new TileMap(2); // maze 1 is generated with algorithm 2 for more complexity and longer paths
   this.map2 = new TileMap(2); // maze 2 is also generated with algorithm 2 for more complexity and longer paths
   this.dungeonMap = new TileMap(2); // dungeon map is generated with algorithm 2 for more complexity and interesting layouts, but we will heavily modify it with our own dungeon generator to create a more structured and engaging dungeon experience
