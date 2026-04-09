@@ -1,10 +1,17 @@
 import * as THREE from 'three';
-
+/*
+Purpose: The ControllerExitManager class is responsible for managing the visual representation 
+and state of the controller exit in the game world. It creates a visually distinct exit object in the scene, 
+updates its appearance based on whether it is locked or unlocked, and checks if the player has reached the unlocked 
+exit to trigger the end of the game.
+*/
 export class ControllerExitManager {
+  // Initialize the manager with a reference to the world object
   constructor(world) {
     this.world = world;
   }
-
+  
+  // Create the controller exit object in the scene based on the designated tile position
   createControllerExit() {
     if (!this.world.controllerExitTile) {
       return;
@@ -74,6 +81,7 @@ export class ControllerExitManager {
     this.updateControllerExitVisualState(0);
   }
 
+  // Update the visual state of the controller exit based on whether it is locked or unlocked
   updateControllerExitVisualState(dt = 0) {
     if (!this.world.controllerExit) {
       return;
@@ -103,6 +111,7 @@ export class ControllerExitManager {
     }
   }
 
+  // Update the state of the controller exit, checking if it should be unlocked and updating its visual state accordingly
   updateControllerExitState(dt) {
     if (!this.world.controllerExit) {
       return;
@@ -115,12 +124,14 @@ export class ControllerExitManager {
     this.updateControllerExitVisualState(dt);
   }
 
+  // Check if the player has reached the unlocked controller exit to trigger the end of the game
   updateEnergyUnlockRequirement() {
     this.world.energyCellsRequiredForUnlock = Math.ceil(
       this.world.totalEnergyCells * this.world.unlockRequirementFraction
     );
   }
 
+  // Check if the player is within the activation radius of the unlocked controller exit
   isPlayerAtUnlockedControllerExit() {
     if (
       !this.world.main_character ||

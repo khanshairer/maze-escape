@@ -1,17 +1,27 @@
 import { Pathfinder } from './Pathfinder.js';
 import { ClusterGraph } from './ClusterGraph.js';
 
+/*
+Purpose : The HierarchicalAStar class implements a hierarchical pathfinding algorithm that combines high-level
+ cluster-based pathfinding with low-level A* search.
+*/
+
 export class HierarchicalAStar extends Pathfinder {
+  // Initialize the pathfinder with a reference to the map and create a cluster graph based on the map and specified cluster size
   constructor(map, { clusterSize = 5 } = {}) {
     super();
     this.map = map;
     this.clusterGraph = new ClusterGraph(map, clusterSize);
   }
 
+  // Get the cluster ID for a given tile by querying the cluster graph, which allows the pathfinder 
+  // to determine which cluster a tile belongs to for high-level pathfinding
   getClusterIdForTile(tile) {
     return this.clusterGraph.getClusterIdForTile(tile);
   }
 
+  // Find a path from a start tile to an end tile, optionally using a specific map for pathfinding. 
+  // The method first checks if the start and end tiles are valid and walkable,
   findPath(start, end, mapOverride = this.map) {
     const map = mapOverride || this.map;
 
@@ -42,6 +52,8 @@ export class HierarchicalAStar extends Pathfinder {
     return this.buildHierarchicalPath(start, end, clusterRoute);
   }
 
+  // Find a route through the cluster graph from the start cluster to the end cluster using A* search, which provides 
+  // a high-level path that can then be refined with low-level pathfinding
   findClusterRoute(startClusterId, endClusterId) {
     const open = [startClusterId];
     const openSet = new Set(open);
@@ -82,6 +94,8 @@ export class HierarchicalAStar extends Pathfinder {
     return [];
   }
 
+  // Get the appropriate map adapter for a given position by checking which map the position falls within and 
+  // returning an object with a handleCollisions method that adjusts entity positions based on the specific map's collision handling
   buildHierarchicalPath(start, end, clusterRoute) {
     let currentTile = start;
     const finalPath = [start];
@@ -130,6 +144,8 @@ export class HierarchicalAStar extends Pathfinder {
     return finalPath;
   }
 
+  // Select the best portal to use for transitioning between clusters based on a combination of 
+  // the low-level path cost to the portal and a heuristic estimate of the remaining distance to the end tile
   selectPortalForStep(currentTile, endTile, currentClusterId, nextClusterId) {
     const portals = this.clusterGraph.getPortalsBetween(currentClusterId, nextClusterId);
     let bestPortal = null;
@@ -164,6 +180,7 @@ export class HierarchicalAStar extends Pathfinder {
     return bestPortal;
   }
 
+  // Perform a low-level A* search between two tiles while restricting the search to a specified set of allowed cluster IDs,
   lowLevelAStar(start, end, allowedClusterIds) {
     if (start === end) {
       return [start];
@@ -207,6 +224,8 @@ export class HierarchicalAStar extends Pathfinder {
     return [];
   }
 
+  // Check if a tile is allowed for traversal based on whether it is the end tile or if its 
+  // cluster ID is in the set of allowed cluster IDs,
   isTileAllowed(tile, allowedClusterIds, endTile) {
     if (tile === endTile) {
       return true;
@@ -216,20 +235,26 @@ export class HierarchicalAStar extends Pathfinder {
     return allowedClusterIds.has(clusterId);
   }
 
+  // Calculate a heuristic estimate of the distance between two tiles using Manhattan distance, which is suitable for grid-based maps
   tileHeuristic(tileA, tileB) {
     return Math.abs(tileA.row - tileB.row) + Math.abs(tileA.col - tileB.col);
   }
 
+  // Calculate the total cost of a path by summing the cost of each tile in the path, using a 
+  // default cost of 1 if a tile does not have a specific cost defined
   pathCost(path) {
     return path.reduce((total, tile) => total + (tile.cost ?? 1), 0);
   }
 
+  // Append a segment of tiles to the target path, ensuring that the last tile of the target is not 
+  // duplicated if it is the same as the first tile of the segment
   appendPath(target, segment) {
     for (const tile of segment) {
       this.appendTile(target, tile);
     }
   }
 
+  // Append a single tile to the target path if it is not the same as the last tile in the target,
   appendTile(target, tile) {
     if (target[target.length - 1] !== tile) {
       target.push(tile);

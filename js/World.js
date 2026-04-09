@@ -130,11 +130,7 @@ getMapForPosition(position) {
   return this.worldCollisionManager.getMapForPosition(position);
 }
 
-  
-
-  
-
-  // Update loading indicator wrapper
+ // Update loading indicator wrapper
   updateLoadingIndicator() {
   this.loadingIndicatorManager.updateLoadingIndicator();
 }
@@ -254,7 +250,6 @@ snapEntityToWalkableTile(entity) {
   }
 }
 
-
 // is player on safe tile in hallway 2 helper function
 /*
 *purpose: determine if the main character is currently standing on a safe tile (medium terrain) in maze 2, which would allow them to avoid detection by drones. 
@@ -268,12 +263,10 @@ isPlayerOnSafeTile() {
   return this.worldCollisionManager.isPlayerOnSafeTile();
 }
 
-
 // controller exit wrapper 
 isPlayerAtUnlockedControllerExit() {
   return this.controllerExitManager.isPlayerAtUnlockedControllerExit();
 }
-
 // restart world wrapper 
 reset() {
   this.WorldResetManager.reset();

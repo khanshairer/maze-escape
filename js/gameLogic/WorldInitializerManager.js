@@ -10,12 +10,19 @@ import { DroneEntity } from '../entities/DroneEntity.js';
 import { DungeonGuard } from '../entities/DungeonGuard.js';
 import { MainCharacter } from '../entities/MainCharacter.js';
 import { EnergyCellManager } from './EnergyCellManager.js';
-import { ControllerExitManager } from './ControllerExitManager.js';
 import { WorldLayoutManager } from './WorldLayoutManager.js';
 import { WorldCollisionManager } from './WorldCollisionManager.js';
 import { LoadingManager } from './LoadingManager.js';
 import { WorldResetManager } from './WorldResetManager.js';
 
+/*
+Purpose : The WorldInitializer class is responsible for setting up the game world by creating the tile maps for the mazes and dungeon, 
+rendering them in the scene, creating hallway connections between the mazes and dungeon, placing the main character 
+and other entities in the world, and initializing the necessary properties and references for gameplay mechanics such as energy cell collection
+ and controller exit unlocking. 
+
+ This class serves as the central point for initializing all aspects of the game world before the game starts running.
+*/
 export class WorldInitializer {
   constructor(world) {
     this.world = world;
