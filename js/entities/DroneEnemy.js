@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { DynamicEntity } from './DynamicEntity.js';
 import { StateMachine } from '../ai/decisions/state-machines/StateMachine.js';
-import { GuardState } from '../ai/decisions/state-machines/GuardState.js';
+import { PatrolState } from '../ai/decisions/state-machines/DroneStates.js';
 import { GroupSteeringBehaviours } from '../ai/steering/GroupSteeringBehaviours.js';
 import { CollisionAvoidSteering } from '../ai/steering/CollisionAvoidSteering.js';
 import { Path } from '../maps/Path.js';
@@ -88,7 +88,8 @@ export class DroneEnemy extends DynamicEntity {
   /*
   
   Purpose : initializeFSM is a method that sets up the finite state machine (FSM) for the DroneEnemy, 
-  initializing it with the provided data and setting the initial state to GuardState.
+  initializing it with the provided data and setting the initial state to PatrolState from the active
+  drone FSM architecture.
   
   Parameters: data - an object containing relevant information about the game world and player 
   that the enemy can use to determine its behavior in the FSM.
@@ -96,7 +97,7 @@ export class DroneEnemy extends DynamicEntity {
   */
   initializeFSM(data) {
     this.fsmData = data;
-    this.fsm = new StateMachine(this, new GuardState(), data);
+    this.fsm = new StateMachine(this, new PatrolState(), data);
   }
 
   /*
@@ -612,7 +613,7 @@ resetToSpawn(spawnPosition) {
 
     if (this.fsm) {
       
-      this.fsm.change(new GuardState());
+      this.fsm.change(new PatrolState());
     
     }
   }
