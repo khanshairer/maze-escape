@@ -46,9 +46,9 @@ export class WorldInitializer {
   this.world.worldCollisionManager = new WorldCollisionManager(this.world);
   
   // ----- create two mazes -----
-  this.world.map = new TileMap(2); // maze 1 is generated with algorithm 2 for more complexity and longer paths
-  this.world.map2 = new TileMap(2); // maze 2 is also generated with algorithm 2 for more complexity and longer paths
-  this.world.dungeonMap = new TileMap(2); // dungeon map is generated with algorithm 2 for more complexity and interesting layouts, but we will heavily modify it with our own dungeon generator to create a more structured and engaging dungeon experience
+  this.world.map = new TileMap(3, { useMazeGenerator: true });// maze 1 is generated with algorithm 2 for more complexity and longer paths
+  this.world.map2 = new TileMap(3, { useMazeGenerator: true });// maze 2 is also generated with algorithm 2 for more complexity and longer paths
+  this.world.dungeonMap = new TileMap(2, { useMazeGenerator: false });
   DungeonGenerator.generate(this.world.dungeonMap, 4); // generate a dungeon with 4 rooms using the dungeon generator
    
   //lighting the surroundings

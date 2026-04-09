@@ -1,6 +1,7 @@
 import { Tile } from "./Tile";
 import { LevelMap } from "./LevelMap";
 import * as THREE from "three";
+import { MazeGenerator } from "../pcg/MazeGenerator.js";
 
 // TileMap class will hold information about our Tile grid
 export class TileMap extends LevelMap {
@@ -8,11 +9,13 @@ export class TileMap extends LevelMap {
   // TileMap constructor
   constructor(
     tileSize = 4,
+    options = {},
     ...levelMapConfig
   ) {
     super(levelMapConfig);
 
     this.tileSize = tileSize;
+    this.useMazeGenerator = options.useMazeGenerator ?? false;
     this.cols = Math.floor(this.width / this.tileSize);
     this.rows = Math.floor(this.depth / this.tileSize);
 
@@ -25,31 +28,39 @@ export class TileMap extends LevelMap {
 
   // Generate the tile grid as a maze
   generateGrid() {
-    // Step 1: fill the whole grid with obstacles
+    // Step 1: fill the whole grid with tiles
     for (let r = 0; r < this.rows; r++) {
       
       let row = [];
 
       for (let c = 0; c < this.cols; c++) {
         
-        row.push(new Tile(r, c, Tile.Type.Obstacle));
+        let type = this.useMazeGenerator
+          ? Tile.Type.EasyTerrain
+          : Tile.Type.Obstacle;
+
+        row.push(new Tile(r, c, type));
       
       }
 
       this.grid.push(row);
     }
 
-    // Step 2: choose a valid starting cell
-    // using odd indices works best for DFS maze carving
-    let startRow = 1;
-    let startCol = 1;
+    // Step 2: generate the maze using the lecture-style DFS backtracking generator
+    if (this.useMazeGenerator) {
+      MazeGenerator.generate(this);
+    } else {
+      // using odd indices works best for DFS maze carving
+      let startRow = 1;
+      let startCol = 1;
 
-    // make sure start is inside the grid
-    if (startRow >= this.rows) startRow = 0;
-    if (startCol >= this.cols) startCol = 0;
+      // make sure start is inside the grid
+      if (startRow >= this.rows) startRow = 0;
+      if (startCol >= this.cols) startCol = 0;
 
-    // Step 3: carve the maze
-    this.carveMaze(startRow, startCol);
+      // Step 3: carve the maze
+      this.carveMaze(startRow, startCol);
+    }
 
     // Step 4: optional - assign terrain difficulty to carved walkable tiles
     this.assignTerrainToPaths();
@@ -108,6 +119,8 @@ export class TileMap extends LevelMap {
             random < 0.10 ? Tile.Type.DifficultTerrain :
             random < 0.20 ? Tile.Type.MediumTerrain :
             Tile.Type.EasyTerrain;
+
+          tile.cost = Tile.Cost.get(tile.type);
         }
       }
     }
@@ -123,25 +136,66 @@ export class TileMap extends LevelMap {
     }
   }
 
+  // Get adjacent tiles regardless of walls
+  getAdjacentTiles(tile) {
+    let adjacentTiles = [];
+
+    let directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+    for (let d of directions) {
+      let r = tile.row + d[0];
+      let c = tile.col + d[1];
+
+      if (this.isInGrid(r, c)) {
+        adjacentTiles.push(this.grid[r][c]);
+      }
+    }
+
+    return adjacentTiles;
+  }
+
   // Get neighbours for a particular tile
   getNeighbours(tile) {
     let neighbours = [];
 
     // we can move in 4 possible directions
-    let directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    let row = tile.row;
+    let col = tile.col;
 
     // Iterate over the directions
-    for (let d of directions) {
-      
-      let r = tile.row + d[0];
-      let c = tile.col + d[1];
+    // If there is no wall in that direction
+    // and the neighbouring tile exists, add it to our list of neighbours
+    if (this.useMazeGenerator) {
+      if (!tile.walls.north && this.isInGrid(row - 1, col) && this.grid[row - 1][col].isWalkable()) {
+        neighbours.push(this.grid[row - 1][col]);
+      }
 
-      // If the neighbouring tile is walkable
-      // and it exists, add it to our list of neighbours
-      if (this.isInGrid(r, c) && this.grid[r][c].isWalkable()) {
+      if (!tile.walls.south && this.isInGrid(row + 1, col) && this.grid[row + 1][col].isWalkable()) {
+        neighbours.push(this.grid[row + 1][col]);
+      }
+
+      if (!tile.walls.west && this.isInGrid(row, col - 1) && this.grid[row][col - 1].isWalkable()) {
+        neighbours.push(this.grid[row][col - 1]);
+      }
+
+      if (!tile.walls.east && this.isInGrid(row, col + 1) && this.grid[row][col + 1].isWalkable()) {
+        neighbours.push(this.grid[row][col + 1]);
+      }
+    } else {
+      let directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+      for (let d of directions) {
         
-        neighbours.push(this.grid[r][c]);
-      
+        let r = tile.row + d[0];
+        let c = tile.col + d[1];
+
+        // If the neighbouring tile is walkable
+        // and it exists, add it to our list of neighbours
+        if (this.isInGrid(r, c) && this.grid[r][c].isWalkable()) {
+          
+          neighbours.push(this.grid[r][c]);
+        
+        }
       }
     }
 
@@ -182,10 +236,16 @@ export class TileMap extends LevelMap {
 
   // Get random walkable tile
   getRandomWalkableTile() {
+  
+    let walkableTiles = this.walkableTiles;
+
+    if (!walkableTiles || walkableTiles.length === 0) {
+      walkableTiles = this.grid.flat().filter(tile => tile.isWalkable());
+    }
+
+    let index = Math.floor(Math.random() * walkableTiles.length);
     
-    let index = Math.floor(Math.random() * this.walkableTiles.length);
-    
-    return this.walkableTiles[index];
+    return walkableTiles[index];
   }
 
   // Returns a position applied to the entity so that
@@ -197,50 +257,94 @@ export class TileMap extends LevelMap {
     let radius = Math.max(entity.scale.x, entity.scale.z) / 2;
 
     let tile = this.quantize(pos);
-    let neighbours = this.getNeighbours(tile);
 
     let center = this.localize(tile);
     let half = this.tileSize / 2;
 
-    // pushes position.z if collision north
-    if (tile.row === 0 || !neighbours.includes(this.grid[tile.row - 1][tile.col])) {
-      
-      let dz = pos.z - (center.z - half);
-      
-      if (Math.abs(dz) < radius)
+    if (this.useMazeGenerator) {
+      // pushes position.z if collision north
+      if (tile.row === 0 || tile.walls.north) {
         
-        pos.z += Math.sign(dz || 1) * (radius - Math.abs(dz));
-    
+        let dz = pos.z - (center.z - half);
+        
+        if (Math.abs(dz) < radius)
+          
+          pos.z += Math.sign(dz || 1) * (radius - Math.abs(dz));
+      
+        }
+
+      // pushes position.z if collision south
+      if (tile.row === this.rows - 1 || tile.walls.south) {
+        
+        let dz = pos.z - (center.z + half);
+        
+        if (Math.abs(dz) < radius)
+          
+          pos.z += Math.sign(dz || 1) * (radius - Math.abs(dz));
       }
 
-    // pushes position.z if collision south
-    if (tile.row === this.rows - 1 || !neighbours.includes(this.grid[tile.row + 1][tile.col])) {
-      
-      let dz = pos.z - (center.z + half);
-      
-      if (Math.abs(dz) < radius)
+      // pushes position.x if collision west
+      if (tile.col === 0 || tile.walls.west) {
         
-        pos.z += Math.sign(dz || 1) * (radius - Math.abs(dz));
-    }
+        let dx = pos.x - (center.x - half);
+        
+        if (Math.abs(dx) < radius)
+          
+          pos.x += Math.sign(dx || 1) * (radius - Math.abs(dx));
+      }
 
-    // pushes position.x if collision west
-    if (tile.col === 0 || !neighbours.includes(this.grid[tile.row][tile.col - 1])) {
-      
-      let dx = pos.x - (center.x - half);
-      
-      if (Math.abs(dx) < radius)
+      // pushes position.x if collision east
+      if (tile.col === this.cols - 1 || tile.walls.east) {
         
-        pos.x += Math.sign(dx || 1) * (radius - Math.abs(dx));
-    }
+        let dx = pos.x - (center.x + half);
+        
+        if (Math.abs(dx) < radius)
+          
+          pos.x += Math.sign(dx || 1) * (radius - Math.abs(dx));
+      }
+    } else {
+      let neighbours = this.getNeighbours(tile);
 
-    // pushes position.x if collision east
-    if (tile.col === this.cols - 1 || !neighbours.includes(this.grid[tile.row][tile.col + 1])) {
-      
-      let dx = pos.x - (center.x + half);
-      
-      if (Math.abs(dx) < radius)
+      // pushes position.z if collision north
+      if (tile.row === 0 || !neighbours.includes(this.grid[tile.row - 1][tile.col])) {
         
-        pos.x += Math.sign(dx || 1) * (radius - Math.abs(dx));
+        let dz = pos.z - (center.z - half);
+        
+        if (Math.abs(dz) < radius)
+          
+          pos.z += Math.sign(dz || 1) * (radius - Math.abs(dz));
+      
+        }
+
+      // pushes position.z if collision south
+      if (tile.row === this.rows - 1 || !neighbours.includes(this.grid[tile.row + 1][tile.col])) {
+        
+        let dz = pos.z - (center.z + half);
+        
+        if (Math.abs(dz) < radius)
+          
+          pos.z += Math.sign(dz || 1) * (radius - Math.abs(dz));
+      }
+
+      // pushes position.x if collision west
+      if (tile.col === 0 || !neighbours.includes(this.grid[tile.row][tile.col - 1])) {
+        
+        let dx = pos.x - (center.x - half);
+        
+        if (Math.abs(dx) < radius)
+          
+          pos.x += Math.sign(dx || 1) * (radius - Math.abs(dx));
+      }
+
+      // pushes position.x if collision east
+      if (tile.col === this.cols - 1 || !neighbours.includes(this.grid[tile.row][tile.col + 1])) {
+        
+        let dx = pos.x - (center.x + half);
+        
+        if (Math.abs(dx) < radius)
+          
+          pos.x += Math.sign(dx || 1) * (radius - Math.abs(dx));
+      }
     }
 
     return pos;

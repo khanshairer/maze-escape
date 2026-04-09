@@ -34,6 +34,13 @@ export class Tile {
     this.pathCost = Infinity; 
     this.flowVector = new THREE.Vector3(0,0,0);
 
+    this.walls = {
+      north: true,
+      south: true,
+      east: true,
+      west: true
+    };
+
   }
 
   // Check to see if we can walk on this tile

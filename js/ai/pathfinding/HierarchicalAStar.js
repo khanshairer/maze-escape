@@ -1,5 +1,6 @@
 import { Pathfinder } from './Pathfinder.js';
 import { ClusterGraph } from './ClusterGraph.js';
+import { MinHeap } from './util/MinHeap.js';
 
 /*
 Purpose : The HierarchicalAStar class implements a hierarchical pathfinding algorithm that combines high-level
@@ -55,17 +56,19 @@ export class HierarchicalAStar extends Pathfinder {
   // Find a route through the cluster graph from the start cluster to the end cluster using A* search, which provides 
   // a high-level path that can then be refined with low-level pathfinding
   findClusterRoute(startClusterId, endClusterId) {
-    const open = [startClusterId];
-    const openSet = new Set(open);
+    const open = new MinHeap();
+    const openSet = new Set();
     const cameFrom = new Map();
     const gScore = new Map([[startClusterId, 0]]);
     const fScore = new Map([
       [startClusterId, this.clusterGraph.heuristic(startClusterId, endClusterId)]
     ]);
 
-    while (open.length > 0) {
-      open.sort((a, b) => (fScore.get(a) ?? Infinity) - (fScore.get(b) ?? Infinity));
-      const current = open.shift();
+    open.enqueue(startClusterId, fScore.get(startClusterId));
+    openSet.add(startClusterId);
+
+    while (!open.isEmpty()) {
+      const current = open.dequeue();
       openSet.delete(current);
 
       if (current === endClusterId) {
@@ -78,15 +81,13 @@ export class HierarchicalAStar extends Pathfinder {
         if (tentativeG < (gScore.get(neighbourId) ?? Infinity)) {
           cameFrom.set(neighbourId, current);
           gScore.set(neighbourId, tentativeG);
-          fScore.set(
-            neighbourId,
-            tentativeG + this.clusterGraph.heuristic(neighbourId, endClusterId)
-          );
 
-          if (!openSet.has(neighbourId)) {
-            open.push(neighbourId);
-            openSet.add(neighbourId);
-          }
+          const priority =
+            tentativeG + this.clusterGraph.heuristic(neighbourId, endClusterId);
+
+          fScore.set(neighbourId, priority);
+          open.enqueue(neighbourId, priority);
+          openSet.add(neighbourId);
         }
       }
     }
@@ -186,15 +187,17 @@ export class HierarchicalAStar extends Pathfinder {
       return [start];
     }
 
-    const open = [start];
-    const openSet = new Set(open);
+    const open = new MinHeap();
+    const openSet = new Set();
     const cameFrom = new Map();
     const gScore = new Map([[start, 0]]);
     const fScore = new Map([[start, this.tileHeuristic(start, end)]]);
 
-    while (open.length > 0) {
-      open.sort((a, b) => (fScore.get(a) ?? Infinity) - (fScore.get(b) ?? Infinity));
-      const current = open.shift();
+    open.enqueue(start, fScore.get(start));
+    openSet.add(start);
+
+    while (!open.isEmpty()) {
+      const current = open.dequeue();
       openSet.delete(current);
 
       if (current === end) {
@@ -211,12 +214,12 @@ export class HierarchicalAStar extends Pathfinder {
         if (tentativeG < (gScore.get(neighbour) ?? Infinity)) {
           cameFrom.set(neighbour, current);
           gScore.set(neighbour, tentativeG);
-          fScore.set(neighbour, tentativeG + this.tileHeuristic(neighbour, end));
 
-          if (!openSet.has(neighbour)) {
-            open.push(neighbour);
-            openSet.add(neighbour);
-          }
+          const priority = tentativeG + this.tileHeuristic(neighbour, end);
+          fScore.set(neighbour, priority);
+
+          open.enqueue(neighbour, priority);
+          openSet.add(neighbour);
         }
       }
     }

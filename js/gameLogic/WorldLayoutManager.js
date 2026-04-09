@@ -58,9 +58,27 @@ export class WorldLayoutManager {
     if (side === 'right') {
       map.grid[row][map.cols - 1].type = Tile.Type.EasyTerrain;
       map.grid[row][map.cols - 2].type = Tile.Type.EasyTerrain;
+
+      if (map.grid[row][map.cols - 2].walls) {
+        map.grid[row][map.cols - 2].walls.east = false;
+      }
+
+      if (map.grid[row][map.cols - 1].walls) {
+        map.grid[row][map.cols - 1].walls.west = false;
+        map.grid[row][map.cols - 1].walls.east = false;
+      }
     } else {
       map.grid[row][0].type = Tile.Type.EasyTerrain;
       map.grid[row][1].type = Tile.Type.EasyTerrain;
+
+      if (map.grid[row][1].walls) {
+        map.grid[row][1].walls.west = false;
+      }
+
+      if (map.grid[row][0].walls) {
+        map.grid[row][0].walls.east = false;
+        map.grid[row][0].walls.west = false;
+      }
     }
   }
 
@@ -81,6 +99,13 @@ export class WorldLayoutManager {
       for (let c = 0; c < map.cols; c++) {
         map.grid[row][c].type = Tile.Type.EasyTerrain;
 
+        if (map.grid[row][c].walls) {
+          if (c > 0) {
+            map.grid[row][c].walls.west = false;
+            map.grid[row][c - 1].walls.east = false;
+          }
+        }
+
         if (c > 1 && map.grid[row][c + 1] && map.grid[row][c + 1].isWalkable()) {
           break;
         }
@@ -99,6 +124,13 @@ export class WorldLayoutManager {
 
       for (let c = map.cols - 1; c >= 0; c--) {
         map.grid[row][c].type = Tile.Type.EasyTerrain;
+
+        if (map.grid[row][c].walls) {
+          if (c < map.cols - 1) {
+            map.grid[row][c].walls.east = false;
+            map.grid[row][c + 1].walls.west = false;
+          }
+        }
 
         if (c < map.cols - 2 && map.grid[row][c - 1] && map.grid[row][c - 1].isWalkable()) {
           break;
