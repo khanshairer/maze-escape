@@ -1,23 +1,11 @@
 import * as THREE from 'three'; // for general 3D rendering and math utilities
 import * as Setup from './setup.js'; // for setting up the scene, camera, renderer, and lighting
 import { InputHandler } from './input/InputHandler.js'; // for handling player input(main character movement) and interactions with the world
-import { Tile } from './maps/Tile.js'; // for representing individual tiles in the tile maps for the mazes and dungeon
-import { TileMap } from './maps/TileMap.js'; // for creating and managing the tile-based maps for the mazes and dungeon 
-import { TileMapRenderer } from './renderers/TileMapRenderer.js'; // for rendering the tile maps visually in the scene
-import { VectorPathFinding } from './ai/pathfinding/vectorPathFinding.js'; // for implementing vector path finding..
-import { HierarchicalAStar } from './ai/pathfinding/HierarchicalAStar.js'; // for implementing hierarchical pathfinding for drones in maze 2
 import { DebugVisuals } from './debug/DebugVisuals.js'; // for deugging purposes..
-import { DungeonGenerator } from './pcg/DungeonGenerator.js'; // for procedurally generating the dungeon map with rooms and corridors for the third part of the world
-import { GroundAttackers } from './entities/GroundAttackers.js';
-import { DroneEntity } from './entities/DroneEntity.js';
-import { DungeonGuard } from './entities/DungeonGuard.js';
-import { MainCharacter } from './entities/MainCharacter.js';
-import { EnergyCellManager } from './gameLogic/EnergyCellManager.js';
 import { ControllerExitManager } from './gameLogic/ControllerExitManager.js';
-import { WorldLayoutManager } from './gameLogic/WorldLayoutManager.js';
-import { LoadingManager } from './gameLogic/LoadingManager.js';
-import { WorldResetManager } from './gameLogic/WorldResetManager.js';
+import { WorldInitializer } from './gameLogic/WorldInitializerManager.js';
 import { WorldCollisionManager } from './gameLogic/WorldCollisionManager.js';
+import { WorldResetManager } from './gameLogic/WorldResetManager.js'; // ADDED missing import
 
 /**
  * World class holds all information about our game's world
@@ -34,7 +22,10 @@ export class World {
     this.clock = new THREE.Clock();
     this.inputHandler = new InputHandler(this.camera);
     this.entities = [];
- 
+    // manager
+    this.WorldResetManager = new WorldResetManager(this);
+    this.worldCollisionManager = new WorldCollisionManager(this);
+
     // added ................
     this.droneRespawnDelay = 0.8;
     this.controllerExitManager = new ControllerExitManager(this);
@@ -86,6 +77,23 @@ export class World {
 
     // debug visuals for vector pathfinding
     this.debugVisuals = new DebugVisuals(this.scene); // to see the arrows.
+
+    // ========== ADDED missing property initializations ==========
+    this.mainCharacterManager = null;      // set by WorldInitializer
+    this.dungeonGuardManager = null;       // set by WorldInitializer
+    this.groundAttackerManager = null;     // set by WorldInitializer
+    this.droneManager = null;              // set by WorldInitializer
+    this.energyCellManager = null;         // set by WorldInitializer
+    this.map = null;                       // set by WorldInitializer (tile map)
+    this.isGameOver = false;               // game state flag
+    this.dungeonGuard = null;              // reference to dungeon guard entity
+    this.dungeonOffset = { x: 0, z: 0 };   // used in clampPositionToDungeon
+    this.dungeonMap = null;                // used for dungeon bounds
+    // Dummy loading indicator manager to avoid errors if not yet set
+    this.loadingIndicatorManager = {
+      updateLoadingIndicator: () => {}
+    };
+    // ============================================================
   }
 
   // Initialize objects in our world
@@ -96,205 +104,8 @@ export class World {
   This method is called to set up everything in the world before the game starts running.
   */
   init() {
-  // loading tracking variables
-  this.loadingComplete = false;
-  this.modelsLoaded = 0;
-  this.modelsLoading = 0;
-
-  // world layout manager to handle the creation of the mazes, dungeon, and hallway connections between them with proper alignment and walkable paths for the player to navigate through the world and reach the controller exit in the dungeon after collecting enough energy cells
-  this.worldLayoutManager = new WorldLayoutManager(this);
-  this.worldCollisionManager = new WorldCollisionManager(this);
-  
-  // ----- create two mazes -----
-  this.map = new TileMap(2); // maze 1 is generated with algorithm 2 for more complexity and longer paths
-  this.map2 = new TileMap(2); // maze 2 is also generated with algorithm 2 for more complexity and longer paths
-  this.dungeonMap = new TileMap(2); // dungeon map is generated with algorithm 2 for more complexity and interesting layouts, but we will heavily modify it with our own dungeon generator to create a more structured and engaging dungeon experience
-  DungeonGenerator.generate(this.dungeonMap, 4); // generate a dungeon with 4 rooms using the dungeon generator
-   
-  //lighting the surroundings
-  Setup.createLight(this.scene);
-  
-  //Setup.showHelpers(this.scene, this.camera, this.renderer, this.map);
-
-  // gap between first two mazes
-  this.mazeGap = 4;
-
-  // full width of one maze in world units
-  this.mapWorldWidth = this.map.cols * this.map.tileSize;
-
-  // offset for second maze
-  this.map2Offset = new THREE.Vector3(this.mapWorldWidth + this.mazeGap, 0, 0);
-
-  // ----- create hallway connection between mazes -----
-  let preferredRow = Math.floor(this.map.rows / 2);
-  let row1 = this.worldLayoutManager.findClosestWalkableRow(this.map, preferredRow, 'right');
-  let row2 = this.worldLayoutManager.findClosestWalkableRow(this.map2, preferredRow, 'left');
-
-  this.connectionRow = row1;
-  if (this.map2.grid[this.connectionRow] && this.map2.grid[this.connectionRow][1].isWalkable()) {
-    row2 = this.connectionRow;
-  } else {
-    this.connectionRow = row2;
-    row1 = this.worldLayoutManager.findClosestWalkableRow(this.map, this.connectionRow, 'right');
-  }
-
-  this.worldLayoutManager.openMazeSide(this.map, row1, 'right');
-  this.worldLayoutManager.openMazeSide(this.map2, row2, 'left');
-
-  // ================================
-  // THIRD DUNGEON with 4 rooms 
-  // ================================
-
-  this.dungeonGap = 4;
-  this.map2WorldWidth = this.map2.cols * this.map2.tileSize;
-
-  this.dungeonOffset = new THREE.Vector3(
-    this.map2Offset.x + this.map2WorldWidth + this.dungeonGap,
-    0,
-    0
-  );
-
-  // ----- create hallway connection between map 2 and dungeon -----
-  let rowMap2ToDungeon = this.worldLayoutManager.findClosestWalkableRow(this.map2, preferredRow, 'right');
-  let row3 = this.worldLayoutManager.findClosestWalkableRow(this.dungeonMap, preferredRow, 'left');
-
-  this.connectionRow2 = rowMap2ToDungeon;
-
-  if (
-    this.dungeonMap.grid[this.connectionRow2] &&
-    this.dungeonMap.grid[this.connectionRow2][1] &&
-    this.dungeonMap.grid[this.connectionRow2][1].isWalkable()
-  ) {
-    row3 = this.connectionRow2;
-  } else {
-    this.connectionRow2 = row3;
-    rowMap2ToDungeon = this.worldLayoutManager.findClosestWalkableRow(this.map2, this.connectionRow2, 'right');
-  }
-  
-  // open the sides of the mazes to create doorways for the hallways between map 1 and map 2, and between map 2 and the dungeon
-  this.worldLayoutManager.openMazeSide(this.map2, rowMap2ToDungeon, 'right');
-  this.worldLayoutManager.openMazeSide(this.dungeonMap, row3, 'left');
-
-  // ONLY connect the dungeon door into the dungeon interior
-  // do NOT carve through map2, that breaks maze2 movement
-  this.worldLayoutManager.connectSideToInterior(this.dungeonMap, row3, 'left');
-
-  this.map.walkableTiles = this.map.grid.flat().filter(tile => tile.isWalkable());
-  this.map2.walkableTiles = this.map2.grid.flat().filter(tile => tile.isWalkable());
-  this.dungeonMap.walkableTiles = this.dungeonMap.grid.flat().filter(tile => tile.isWalkable());
-  // create hierarchical pathfinder for drones in maze 2 with cluster size of 5 for good performance and still challenging movement as they chase the player through the larger and more complex maze 2
-  this.droneHierarchicalPathfinder = new HierarchicalAStar(this.map2, {
-  clusterSize: this.droneClusterSize
-});
-
-
-// ADD EXTRA GREEN (SAFE) TILES IN MAP 2 for lowering the difficulites in maze 2 
-this.worldLayoutManager.addExtraGreenTiles(this.map2, 8); // 8 tiles
-
-  // ----- render first maze in the scene -----
-  this.mazeGroup1 = new THREE.Group();
-  this.scene.add(this.mazeGroup1);
- 
-  // render the first maze with fences as obstacles for more visual interest and to create more defined pathways and cover for the player as they navigate through maze 1, while also providing a consistent visual theme with the fence obstacles appearing throughout the world including in the second maze and dungeon
-  this.tileMapRenderer = new TileMapRenderer(this.map, {
-    useFenceObstacles: true,
-    fencePath: '/fence/scene.gltf',
-    fenceScale: new THREE.Vector3(0.4, 0.4, 0.4)
-  });
-  this.tileMapRenderer.render(this.mazeGroup1);
-
-  // ----- render second maze in the scene -----
-  this.mazeGroup2 = new THREE.Group();
-  this.mazeGroup2.position.copy(this.map2Offset);
-  this.scene.add(this.mazeGroup2);
-
-  // render the second maze with fences as obstacles for more visual interest and to create more defined pathways and cover for the player as they navigate through maze 2, while also providing a consistent visual theme with the fence obstacles appearing throughout the world including in the first maze and dungeon
-  this.tileMapRenderer2 = new TileMapRenderer(this.map2, {
-    useFenceObstacles: true,
-    fencePath: '/fence/scene.gltf',
-    fenceScale: new THREE.Vector3(0.5, 0.5, 0.5)
-  });
-  // render the second maze with fences as obstacles for more visual interest and to create more defined pathways and cover for the player as they navigate through maze 2, while also providing a consistent visual theme with the fence obstacles appearing throughout the world including in the first maze and dungeon
-  this.tileMapRenderer2.render(this.mazeGroup2);
-  
-  // `----- render dungeon in the scene -----`
-  this.dungeonGroup = new THREE.Group(); // to hold all the meshes for the dungeon and allow us to easily position the entire dungeon in the world with an offset so that it is placed to the right of the second maze with a gap in between for the hallway connection, while also keeping all the dungeon meshes organized under one parent group in the scene graph for better structure and easier management of the dungeon as a whole
-  this.dungeonGroup.position.copy(this.dungeonOffset);
-  this.scene.add(this.dungeonGroup);
-
-  this.dungeonRenderer = new TileMapRenderer(this.dungeonMap, {
-    useFenceObstacles: false
-  });
-  this.dungeonRenderer.render(this.dungeonGroup);
-
-
-  // ----- render hallway between map 1 and map 2 -----
-  this.worldLayoutManager.createHallway(row1, row2);
-
-  // ----- render hallway between map 2 and dungeon -----
-  this.worldLayoutManager.createHallwayBetweenMap2AndDungeon(rowMap2ToDungeon, row3);
-
-  this.dungeonEntryTile = this.dungeonMap.grid[row3][0];
-  this.controllerExitTile = this.worldLayoutManager.findFarthestWalkableTile(
-    this.dungeonMap,
-    this.dungeonEntryTile
-  );
-  this.controllerExitManager.createControllerExit();
-
-  // -------- DOOR GOAL --------
-  this.doorGoal = this.map.grid[row1][this.map.cols - 1];
-  if (!this.doorGoal.isWalkable()) {
-    this.doorGoal = this.map.grid[row1][this.map.cols - 2];
-  }
-
-  // main character
-  this.mainCharacterManager = new MainCharacter(this);
-  this.mainCharacterManager.createMainCharacter();
-
-  // crreate 10 ground attackers
-  this.groundAttackerManager = new GroundAttackers(this);
-  this.groundAttackerManager.create(7); // create 10 ground attackers in maze 1 to chase the player and create dynamic and challenging gameplay as they respawn after reaching the door goal to keep up the pressure on the player and make maze 1 more engaging
-
-  // vector pathfinding 
-  this.groundVectorPathFinding = new VectorPathFinding(
-    this.map,
-    this.ground_attackers,
-    this.scene,
-    this.debugVisuals
-  );
-
-  this.groundVectorPathFinding.buildCostField(this.doorGoal);
-  this.groundVectorPathFinding.allTileArrows(this.doorGoal);
-
-  
-  //this.createGoals(5);
-  this.loadingIndicatorManager = new LoadingManager(this);
-  this.loadingIndicatorManager.createLoadingIndicator();
-  this.WorldResetManager = new WorldResetManager(this);
-  // Drone manager
-  this.droneManager = new DroneEntity(this);
-  this.droneManager.create(3); // create 10 drones in maze 2 to chase the player and create dynamic and challenging gameplay as they navigate through the larger and more complex maze 2, while also showcasing the hierarchical pathfinding with a cluster size of 5 for good performance and still intelligent movement from the drones as they pursue the player through maze 2
-
-  
-  // Dungeon guard Mananager
-  this.dungeonGuardManager = new DungeonGuard(this);
-
-  this.dungeonGuardManager.createPatrolLoopInDungeon3();
-  
-  this.dungeonGuardManager.drawDungeon3PatrolLoop();
-
-  this.dungeonGuardManager.createDungeonGuard();
-
-
-  //create energy cells for unlocking controller exit
-  this.energyCellManager = new EnergyCellManager(this);
-  this.energyCellManager.createEnergyCells(3);
-
-  //this.createGoalsForMap(this.map2, this.map2Offset, 5);
-  //this.createNPCsForMap(this.map2, this.map2Offset, 10);
-  this.energyCellManager.createEnergyCellsForMap(this.map2, this.map2Offset, 3);
-  this.energyCellManager.createEnergyCellsForMap(this.dungeonMap, this.dungeonOffset, 3);
-  this.controllerExitManager.updateEnergyUnlockRequirement();
+    const initializer = new WorldInitializer(this);
+    initializer.init();
 }
 
 /*
