@@ -6,6 +6,7 @@ for defining rooms in a procedural generation context, allowing for easy creatio
 */
 export class Room {
   
+  // Initialize the room with its position and dimensions, and set child references to null
   constructor(x, y, width, height) {
     
     this.x = x;
@@ -15,6 +16,8 @@ export class Room {
   
   }
 
+  // Calculate and return the coordinates of the center point of the room, which can be useful for placing objects or 
+  // characters within the room
   center() {
     
     return {

@@ -1,19 +1,27 @@
 import * as THREE from 'three';
 import { EnergyCell } from '../entities/EnergyCell.js';
-
+/*
+Purpose : The EnergyCellManager class is responsible for managing the creation, placement, and collection of energy cells in the game world. 
+It handles spawning energy cells on valid tiles, ensuring they do not overlap with the player or each other, 
+and updating their state as the player collects them.
+*/
 export class EnergyCellManager {
+  // Initialize the manager with a reference to the world object
   constructor(world) {
     this.world = world;
   }
 
+  // Create energy cells in the world, either for the main map or a specific map with an offset
   createEnergyCells(numCells = 5) {
     this.spawnEnergyCells(this.world.map, new THREE.Vector3(0, 0, 0), numCells);
   }
 
+  // Create energy cells for a specific map with an offset, used for spawning in the second maze or dungeon
   createEnergyCellsForMap(map, offset, numCells = 5) {
     this.spawnEnergyCells(map, offset, numCells);
   }
 
+  // Spawn energy cells on valid tiles within the specified map and offset, ensuring they do not overlap with the player or each other
   spawnEnergyCells(map, offset, numCells = 5) {
     let createdCount = 0;
     let attempts = 0;
@@ -43,6 +51,8 @@ export class EnergyCellManager {
     }
   }
 
+  // Check if a tile is valid for placing an energy cell, ensuring it is walkable, not occupied by another cell, 
+  // and not on the player's current tile
   isValidEnergyCellTile(map, tile, offset) {
     if (!tile || !tile.isWalkable()) {
       return false;
@@ -70,6 +80,7 @@ export class EnergyCellManager {
     return !(playerTile.row === tile.row && playerTile.col === tile.col);
   }
 
+  // Update the state of energy cells, checking for collection by the player and updating their visual state
   updateEnergyCells(dt) {
     if (!this.world.main_character || this.world.energyCells.length === 0) {
       return;

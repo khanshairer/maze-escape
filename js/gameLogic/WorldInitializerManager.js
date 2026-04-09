@@ -10,12 +10,19 @@ import { DroneEntity } from '../entities/DroneEntity.js';
 import { DungeonGuard } from '../entities/DungeonGuard.js';
 import { MainCharacter } from '../entities/MainCharacter.js';
 import { EnergyCellManager } from './EnergyCellManager.js';
-import { ControllerExitManager } from './ControllerExitManager.js';
 import { WorldLayoutManager } from './WorldLayoutManager.js';
 import { WorldCollisionManager } from './WorldCollisionManager.js';
 import { LoadingManager } from './LoadingManager.js';
 import { WorldResetManager } from './WorldResetManager.js';
 
+/*
+Purpose : The WorldInitializer class is responsible for setting up the game world by creating the tile maps for the mazes and dungeon, 
+rendering them in the scene, creating hallway connections between the mazes and dungeon, placing the main character 
+and other entities in the world, and initializing the necessary properties and references for gameplay mechanics such as energy cell collection
+ and controller exit unlocking. 
+
+ This class serves as the central point for initializing all aspects of the game world before the game starts running.
+*/
 export class WorldInitializer {
   constructor(world) {
     this.world = world;
@@ -39,9 +46,9 @@ export class WorldInitializer {
   this.world.worldCollisionManager = new WorldCollisionManager(this.world);
   
   // ----- create two mazes -----
-  this.world.map = new TileMap(2); // maze 1 is generated with algorithm 2 for more complexity and longer paths
-  this.world.map2 = new TileMap(2); // maze 2 is also generated with algorithm 2 for more complexity and longer paths
-  this.world.dungeonMap = new TileMap(2); // dungeon map is generated with algorithm 2 for more complexity and interesting layouts, but we will heavily modify it with our own dungeon generator to create a more structured and engaging dungeon experience
+  this.world.map = new TileMap(3, { useMazeGenerator: true });// maze 1 is generated with algorithm 2 for more complexity and longer paths
+  this.world.map2 = new TileMap(3, { useMazeGenerator: true });// maze 2 is also generated with algorithm 2 for more complexity and longer paths
+  this.world.dungeonMap = new TileMap(2, { useMazeGenerator: false });
   DungeonGenerator.generate(this.world.dungeonMap, 4); // generate a dungeon with 4 rooms using the dungeon generator
    
   //lighting the surroundings

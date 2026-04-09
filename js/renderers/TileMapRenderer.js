@@ -5,7 +5,7 @@ import { Tile } from '../maps/Tile';
 // Tile map renderer
 /*
 Purpose: The TileMapRenderer class is responsible for rendering a tile-based map in a 3D environment using Three.js. 
-It takes a TileMap object and generates visual representations of the walkable tiles and obstacles. The class provides methods to create tile
+It takes a TileMap object and generates visual representations of the walkable tiles and obstacles. The class provides methods for creating tile
  meshes, apply colors based on tile types, and optionally render decorative fence segments around obstacles. It uses instanced meshes for 
  efficient rendering of multiple tiles and can be customized with different materials and models for obstacles.
 
@@ -212,15 +212,92 @@ export class TileMapRenderer {
     );
   }
 
+  getWallTransformations() {
+    
+    let wallMatrices = [];
+    let wallThickness = this.map.tileSize * 0.25;
+    let wallHeight = 2;
+    let tileSize = this.map.tileSize;
+    let half = tileSize / 2;
+
+    for (let tile of this.map.grid.flat()) {
+      let pos = this.map.localize(tile);
+
+      if (tile.walls?.north) {
+        let matrix = new THREE.Matrix4();
+        matrix.makeScale(tileSize, wallHeight, wallThickness);
+        matrix.setPosition(pos.x, wallHeight / 2, pos.z - half);
+        wallMatrices.push(matrix);
+      }
+
+      if (tile.walls?.west) {
+        let matrix = new THREE.Matrix4();
+        matrix.makeScale(wallThickness, wallHeight, tileSize);
+        matrix.setPosition(pos.x - half, wallHeight / 2, pos.z);
+        wallMatrices.push(matrix);
+      }
+
+      // render outer south border only
+      if (tile.walls?.south && tile.row === this.map.rows - 1) {
+        let matrix = new THREE.Matrix4();
+        matrix.makeScale(tileSize, wallHeight, wallThickness);
+        matrix.setPosition(pos.x, wallHeight / 2, pos.z + half);
+        wallMatrices.push(matrix);
+      }
+
+      // render outer east border only
+      if (tile.walls?.east && tile.col === this.map.cols - 1) {
+        let matrix = new THREE.Matrix4();
+        matrix.makeScale(wallThickness, wallHeight, tileSize);
+        matrix.setPosition(pos.x + half, wallHeight / 2, pos.z);
+        wallMatrices.push(matrix);
+      }
+    }
+
+    return wallMatrices;
+  }
+
+  renderWallBoxes(scene) {
+    
+    const wallMatrices = this.getWallTransformations();
+
+    if (wallMatrices.length === 0) return;
+
+    let geometry = new THREE.BoxGeometry();
+    let material = new THREE.MeshStandardMaterial({ color: '#63b5b7' });
+
+    const wallMesh = new THREE.InstancedMesh(
+      geometry,
+      material,
+      wallMatrices.length
+    );
+
+    for (let i = 0; i < wallMatrices.length; i++) {
+      wallMesh.setMatrixAt(i, wallMatrices[i]);
+      wallMesh.setColorAt(i, new THREE.Color('#3d3d3d'));
+    }
+
+    scene.add(wallMesh);
+  }
+
   render(scene) {
     scene.add(this.mesh);
 
     // always render solid obstacle blocks
     this.renderObstacleBoxes(scene);
 
+    // render solid wall segments only for wall-based mazes
+    if (this.map.useMazeGenerator) {
+      this.renderWallBoxes(scene);
+    }
+
     // optionally add fence border decoration on top
     if (this.useFenceObstacles) {
-      this.renderFenceBorders(scene);
+      if (this.map.useMazeGenerator) {
+        // optional, usually not needed if using wall boxes
+      } else if (this.map.grid.flat().some(tile => tile.type === Tile.Type.Obstacle)) {
+        this.renderFenceBorders(scene);
+      }
     }
   }
 }

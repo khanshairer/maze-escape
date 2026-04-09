@@ -1,4 +1,8 @@
+/*
+Purpose : Do clustering for HPAStar
+*/
 export class ClusterGraph {
+  // constructor 
   constructor(map, clusterSize = 5) {
     this.map = map;
     this.clusterSize = clusterSize;
@@ -11,6 +15,7 @@ export class ClusterGraph {
     this.buildPortals();
   }
 
+  // 
   buildClusters() {
     for (let clusterRow = 0; clusterRow < this.clusterRows; clusterRow++) {
       for (let clusterCol = 0; clusterCol < this.clusterCols; clusterCol++) {
@@ -60,8 +65,12 @@ export class ClusterGraph {
     const leftCluster = this.clusters.get(leftClusterId);
     const boundaryCol = leftCluster.maxCol;
 
+    let currentEntrance = [];
+
     for (let row = leftCluster.minRow; row <= leftCluster.maxRow; row++) {
       if (!this.map.isInGrid(row, boundaryCol + 1)) {
+        this.commitEntrance(leftClusterId, rightClusterId, currentEntrance);
+        currentEntrance = [];
         continue;
       }
 
@@ -69,17 +78,31 @@ export class ClusterGraph {
       const rightTile = this.map.grid[row][boundaryCol + 1];
 
       if (leftTile.isWalkable() && rightTile.isWalkable()) {
-        this.addPortal(leftClusterId, rightClusterId, leftTile, rightTile);
+        currentEntrance.push({
+          clusterAId: leftClusterId,
+          clusterBId: rightClusterId,
+          tileA: leftTile,
+          tileB: rightTile
+        });
+      } else {
+        this.commitEntrance(leftClusterId, rightClusterId, currentEntrance);
+        currentEntrance = [];
       }
     }
+
+    this.commitEntrance(leftClusterId, rightClusterId, currentEntrance);
   }
 
   buildHorizontalBoundaryPortals(topClusterId, bottomClusterId) {
     const topCluster = this.clusters.get(topClusterId);
     const boundaryRow = topCluster.maxRow;
 
+    let currentEntrance = [];
+
     for (let col = topCluster.minCol; col <= topCluster.maxCol; col++) {
       if (!this.map.isInGrid(boundaryRow + 1, col)) {
+        this.commitEntrance(topClusterId, bottomClusterId, currentEntrance);
+        currentEntrance = [];
         continue;
       }
 
@@ -87,9 +110,42 @@ export class ClusterGraph {
       const bottomTile = this.map.grid[boundaryRow + 1][col];
 
       if (topTile.isWalkable() && bottomTile.isWalkable()) {
-        this.addPortal(topClusterId, bottomClusterId, topTile, bottomTile);
+        currentEntrance.push({
+          clusterAId: topClusterId,
+          clusterBId: bottomClusterId,
+          tileA: topTile,
+          tileB: bottomTile
+        });
+      } else {
+        this.commitEntrance(topClusterId, bottomClusterId, currentEntrance);
+        currentEntrance = [];
       }
     }
+
+    this.commitEntrance(topClusterId, bottomClusterId, currentEntrance);
+  }
+
+  commitEntrance(clusterAId, clusterBId, entrance) {
+    if (!entrance || entrance.length === 0) {
+      return;
+    }
+
+    const selectedTransition = this.selectTransitionFromEntrance(entrance);
+    this.addPortal(
+      clusterAId,
+      clusterBId,
+      selectedTransition.tileA,
+      selectedTransition.tileB
+    );
+  }
+
+  selectTransitionFromEntrance(entrance) {
+    if (entrance.length === 1) {
+      return entrance[0];
+    }
+
+    const middleIndex = Math.floor(entrance.length / 2);
+    return entrance[middleIndex];
   }
 
   addPortal(clusterAId, clusterBId, tileA, tileB) {

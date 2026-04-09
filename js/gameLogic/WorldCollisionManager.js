@@ -1,8 +1,14 @@
 import * as THREE from 'three';
 import { Tile } from '../maps/Tile.js';
 
+/*
+Purpose : The WorldCollisionManager class is responsible for managing collision detection and response in the game world. 
+It determines which tile map to use for collision checks based on the player's position, handles clamping the player within the dungeon bounds,
+ and checks if the player is on a safe tile in maze 2 to implement stealth mechanics against drones.
+*/
 export class WorldCollisionManager {
-  constructor(world) {
+  // Initialize the manager with a reference to the world object
+    constructor(world) {
     this.world = world;
   }
 

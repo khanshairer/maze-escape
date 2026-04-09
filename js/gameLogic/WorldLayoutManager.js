@@ -1,11 +1,21 @@
 import * as THREE from 'three';
 import { Tile } from '../maps/Tile.js';
 
+/*
+Purpose : The WorldLayoutManager class is responsible for managing the layout of the game world, including the placement 
+of walkable tiles, creation of hallways between different areas, and ensuring that the player has a navigable path through the maze 
+and dungeon. 
+
+It provides methods for finding suitable tiles for spawning entities, opening
+pathways in the maze, and creating hallways that connect the different sections of the game world.
+*/
 export class WorldLayoutManager {
+  // Initialize the manager with a reference to the world object
   constructor(world) {
     this.world = world;
   }
 
+  // Find the farthest walkable tile from a given starting tile, used for placing entities away from the player
   findFarthestWalkableTile(map, fromTile) {
     if (!fromTile || !fromTile.isWalkable()) {
       return map.getRandomWalkableTile();
@@ -28,6 +38,7 @@ export class WorldLayoutManager {
     return farthestTile;
   }
 
+  // Find the closest walkable tile to a preferred row on a given side of the map, used for opening pathways in the maze
   findClosestWalkableRow(map, preferredRow, side = 'right') {
     const col = side === 'right' ? map.cols - 2 : 1;
 
@@ -42,16 +53,36 @@ export class WorldLayoutManager {
     return Math.max(1, Math.min(map.rows - 2, preferredRow));
   }
 
+  // Open a pathway in the maze on the specified side by changing the tile types to walkable terrain
   openMazeSide(map, row, side = 'right') {
     if (side === 'right') {
       map.grid[row][map.cols - 1].type = Tile.Type.EasyTerrain;
       map.grid[row][map.cols - 2].type = Tile.Type.EasyTerrain;
+
+      if (map.grid[row][map.cols - 2].walls) {
+        map.grid[row][map.cols - 2].walls.east = false;
+      }
+
+      if (map.grid[row][map.cols - 1].walls) {
+        map.grid[row][map.cols - 1].walls.west = false;
+        map.grid[row][map.cols - 1].walls.east = false;
+      }
     } else {
       map.grid[row][0].type = Tile.Type.EasyTerrain;
       map.grid[row][1].type = Tile.Type.EasyTerrain;
+
+      if (map.grid[row][1].walls) {
+        map.grid[row][1].walls.west = false;
+      }
+
+      if (map.grid[row][0].walls) {
+        map.grid[row][0].walls.east = false;
+        map.grid[row][0].walls.west = false;
+      }
     }
   }
 
+  // Connect the side of the maze to the interior by changing tile types to create a navigable path for the player
   connectSideToInterior(map, row, side = 'left') {
     if (side === 'left') {
       let foundWalkable = false;
@@ -67,6 +98,13 @@ export class WorldLayoutManager {
 
       for (let c = 0; c < map.cols; c++) {
         map.grid[row][c].type = Tile.Type.EasyTerrain;
+
+        if (map.grid[row][c].walls) {
+          if (c > 0) {
+            map.grid[row][c].walls.west = false;
+            map.grid[row][c - 1].walls.east = false;
+          }
+        }
 
         if (c > 1 && map.grid[row][c + 1] && map.grid[row][c + 1].isWalkable()) {
           break;
@@ -87,6 +125,13 @@ export class WorldLayoutManager {
       for (let c = map.cols - 1; c >= 0; c--) {
         map.grid[row][c].type = Tile.Type.EasyTerrain;
 
+        if (map.grid[row][c].walls) {
+          if (c < map.cols - 1) {
+            map.grid[row][c].walls.east = false;
+            map.grid[row][c + 1].walls.west = false;
+          }
+        }
+
         if (c < map.cols - 2 && map.grid[row][c - 1] && map.grid[row][c - 1].isWalkable()) {
           break;
         }
@@ -94,6 +139,7 @@ export class WorldLayoutManager {
     }
   }
 
+  // Create a hallway between two rows in the maze, connecting the main map to the second map or the second map to the dungeon
   createHallway(row1, row2) {
     const world = this.world;
 
@@ -166,6 +212,7 @@ export class WorldLayoutManager {
     }
   }
 
+  // Create a hallway between the second maze and the dungeon, connecting the two areas for player navigation
   createHallwayBetweenMap2AndDungeon(row2, row3) {
     const world = this.world;
 
@@ -237,6 +284,7 @@ export class WorldLayoutManager {
     }
   }
 
+  // Add extra walkable tiles to the map to create more navigable paths for the player, enhancing the gameplay experience
   addExtraGreenTiles(map, count = 8) {
     let candidates = map.walkableTiles.filter(
       tile => tile.type !== Tile.Type.MediumTerrain

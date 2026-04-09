@@ -13,6 +13,7 @@ The getLeaves method retrieves all the leaf partitions, which represent the fina
 
 */
 export class Partition {
+  // Initialize the partition with its position and dimensions, and set child references to null
   constructor(x, y, width, height) {
     this.x = x;
     this.y = y;
@@ -23,10 +24,12 @@ export class Partition {
     this.right = null;
   }
 
+  // Check if the partition is a leaf node (i.e., it has no child partitions)
   isLeaf() {
     return this.left === null && this.right === null;
   }
 
+  // Retrieve all leaf partitions by recursively checking child partitions and collecting those that are leaves
   getLeaves() {
     if (this.isLeaf()) {
       return [this];
@@ -45,6 +48,7 @@ export class Partition {
     return leaves;
   }
 
+  // Split the partition into two smaller partitions either horizontally or vertically based on random choice and minimum size constraint
   split(minSize) {
     let canSplitHorizontally = this.height >= minSize * 2;
     let canSplitVertically = this.width >= minSize * 2;
@@ -100,6 +104,7 @@ export class Partition {
   }
 }
 
+// Utility function to generate a random integer between min and max (inclusive)
 function randomInt(min, max) {
 
   return Math.floor(Math.random() * (max - min + 1)) + min;
