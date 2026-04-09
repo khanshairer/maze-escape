@@ -15,7 +15,9 @@ import { MainCharacter } from './entities/MainCharacter.js';
 import { EnergyCellManager } from './gameLogic/EnergyCellManager.js';
 import { ControllerExitManager } from './gameLogic/ControllerExitManager.js';
 import { WorldLayoutManager } from './gameLogic/WorldLayoutManager.js';
-
+import { LoadingManager } from './gameLogic/LoadingManager.js';
+import { WorldResetManager } from './gameLogic/WorldResetManager.js';
+import { WorldCollisionManager } from './gameLogic/WorldCollisionManager.js';
 
 /**
  * World class holds all information about our game's world
@@ -101,6 +103,7 @@ export class World {
 
   // world layout manager to handle the creation of the mazes, dungeon, and hallway connections between them with proper alignment and walkable paths for the player to navigate through the world and reach the controller exit in the dungeon after collecting enough energy cells
   this.worldLayoutManager = new WorldLayoutManager(this);
+  this.worldCollisionManager = new WorldCollisionManager(this);
   
   // ----- create two mazes -----
   this.map = new TileMap(2); // maze 1 is generated with algorithm 2 for more complexity and longer paths
@@ -265,8 +268,9 @@ this.worldLayoutManager.addExtraGreenTiles(this.map2, 8); // 8 tiles
 
   
   //this.createGoals(5);
-  this.createLoadingIndicator();
-  
+  this.loadingIndicatorManager = new LoadingManager(this);
+  this.loadingIndicatorManager.createLoadingIndicator();
+  this.WorldResetManager = new WorldResetManager(this);
   // Drone manager
   this.droneManager = new DroneEntity(this);
   this.droneManager.create(3); // create 10 drones in maze 2 to chase the player and create dynamic and challenging gameplay as they navigate through the larger and more complex maze 2, while also showcasing the hierarchical pathfinding with a cluster size of 5 for good performance and still intelligent movement from the drones as they pursue the player through maze 2
@@ -297,31 +301,12 @@ this.worldLayoutManager.addExtraGreenTiles(this.map2, 8); // 8 tiles
 Purpose: isInHallway is a method that checks if a given position (THREE.Vector3) is within the bounds of either of the two hallways connecting the mazes and dungeon in the world.
 Parameters: position - a THREE.Vector3 representing the current position of the entity for which we want to check if it is within the hallway bounds.
 */
+//this is wrapper
 isInHallway(position) {
   
-  let inHallway1 = false;
-  let inHallway2 = false;
-
-  if (this.hallwayBounds) {
-    
-    inHallway1 =
-      position.x >= this.hallwayBounds.minX &&
-      position.x <= this.hallwayBounds.maxX &&
-      position.z >= this.hallwayBounds.minZ &&
-      position.z <= this.hallwayBounds.maxZ;
-  }
-
-  if (this.hallwayBounds2) {
-    
-    inHallway2 =
-      position.x >= this.hallwayBounds2.minX &&
-      position.x <= this.hallwayBounds2.maxX &&
-      position.z >= this.hallwayBounds2.minZ &&
-      position.z <= this.hallwayBounds2.maxZ;
-  }
-
-  return inHallway1 || inHallway2;
+  return this.worldCollisionManager.isInHallway(position);
 }
+
 
 /*
 Purpose: getMapForPosition is a method that determines which tile map (maze 1, maze 2, or dungeon) should be used for collision detection based on the given position 
@@ -329,154 +314,18 @@ of an entity in the world.
 
 Parameters: position - a THREE.Vector3 representing the current position of the entity for which we want to determine the appropriate tile map for collision detection.
 */
+// this is a wrapper..
 getMapForPosition(position) {
-  
-  if (this.isInHallway(position)) {
-    
-    return this.hallwayMap;
-  
-  }
-
-  const inMap1 =
-    position.x >= this.map.minX &&
-    position.x <= this.map.minX + this.map.cols * this.map.tileSize &&
-    position.z >= this.map.minZ &&
-    position.z <= this.map.minZ + this.map.rows * this.map.tileSize;
-
-  const inMap2 =
-    position.x >= this.map2Offset.x + this.map2.minX &&
-    position.x <= this.map2Offset.x + this.map2.minX + this.map2.cols * this.map2.tileSize &&
-    position.z >= this.map2.minZ &&
-    position.z <= this.map2.minZ + this.map2.rows * this.map2.tileSize;
-
-  const inDungeon =
-    position.x >= this.dungeonOffset.x + this.dungeonMap.minX &&
-    position.x <= this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize &&
-    position.z >= this.dungeonMap.minZ &&
-    position.z <= this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize;
-
-  if (inDungeon) {
-    
-    return {
-      handleCollisions: (entity) => {
-        const fakeEntity = {
-          ...entity,
-          position: entity.position.clone().sub(this.dungeonOffset)
-        };
-
-        const corrected = this.dungeonMap.handleCollisions(fakeEntity);
-        
-        return corrected.add(this.dungeonOffset);
-      
-      }
-    };
-  }
-
-  if (inMap2) {
-    
-    return {
-      handleCollisions: (entity) => {
-        const fakeEntity = {
-          ...entity,
-          position: entity.position.clone().sub(this.map2Offset)
-        };
-
-        const corrected = this.map2.handleCollisions(fakeEntity);
-        
-        return corrected.add(this.map2Offset);
-      
-      }
-    };
-  }
-
-  if (inMap1) {
-    
-    return this.map;
-  
-  }
-
-  return this.hallwayMap;
+  return this.worldCollisionManager.getMapForPosition(position);
 }
 
   
 
-  // Create a loading indicator in the scene
-  /*
-Purpose: createLoadingIndicator is a method that creates a visual loading indicator in the 3D scene to inform the player about the progress of loading 3D models 
-for the drone enemies in the second maze (map2).
- 
-Parameters: This method does not take any parameters. It creates a canvas element, draws text and a progress bar on it, 
-and then uses that canvas as a texture for a sprite that is added to the scene.
-*/
+  
 
-  createLoadingIndicator() {
-    // Create a text sprite or simple indicator
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = 'white';
-    ctx.font = 'bold 24px Arial';
-    ctx.fillText('Loading boats...', 10, 50);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({ map: texture });
-    this.loadingSprite = new THREE.Sprite(material);
-    this.loadingSprite.position.set(0, 5, 0);
-    this.loadingSprite.scale.set(5, 2.5, 1);
-    this.scene.add(this.loadingSprite);
-  }
-
-  // Update loading indicator
-  /*
-Purpose: updateLoadingIndicator is a method that updates the loading indicator displayed in the scene based on the progress of loading 3D models for the drone enemies.
- Parameters: This method does not take any parameters. It calculates the loading progress as a percentage based on the number of models loaded versus the total number of models to load, and updates the canvas texture of the loading sprite accordingly. Once all models are loaded.
-  */
+  // Update loading indicator wrapper
   updateLoadingIndicator() {
-  
-  if (this.loadingComplete) {
-    return;
-  }
-
-  if (!this.loadingSprite) {
-    return;
-  }
-  
-  const progress = this.modelsLoading > 0
-    ? (this.modelsLoaded / this.modelsLoading) * 100
-    : 0;
-
-  // Update canvas text
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = 'white';
-  ctx.font = 'bold 24px Arial';
-  ctx.fillText(`Loading: ${Math.round(progress)}%`, 10, 50);
-
-  // Draw progress bar
-  ctx.fillStyle = '#333';
-  ctx.fillRect(10, 70, 200, 20);
-  ctx.fillStyle = '#0f0';
-  ctx.fillRect(10, 70, 200 * (progress / 100), 20);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  this.loadingSprite.material.map = texture;
-  this.loadingSprite.material.needsUpdate = true;
-
-  if (
-    this.modelsLoaded >= this.modelsLoading &&
-    this.modelsLoading > 0
-  ) {
-    this.loadingComplete = true;
-    setTimeout(() => {
-      if (this.loadingSprite && this.loadingSprite.parent) {
-        this.scene.remove(this.loadingSprite);
-      }
-      this.loadingSprite = null;
-    }, 2000);
-  }
+  this.loadingIndicatorManager.updateLoadingIndicator();
 }
 
   // Add an entity to the world
@@ -498,6 +347,7 @@ Purpose: updateLoadingIndicator is a method that updates the loading indicator d
  * @param {THREE.Vector3} position
  * @returns {Object} Map adapter with handleCollisions method
  */
+// this is a wrapper for the world collision manager method that determines which map adapter to usewhether the position is in the hallway 
 getMapAdapterForPosition(position) {
   
   return this.getMapForPosition(position);
@@ -512,15 +362,7 @@ getMapAdapterForPosition(position) {
 *@returns null
 */
 clampPositionToDungeon(entity) {
-  
-  const minX = this.dungeonOffset.x + this.dungeonMap.minX + 0.1;
-  const maxX = this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize - 0.1;
-  const minZ = this.dungeonMap.minZ + 0.1;
-  const maxZ = this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize - 0.1;
-
-  entity.position.x = THREE.MathUtils.clamp(entity.position.x, minX, maxX);
-  entity.position.z = THREE.MathUtils.clamp(entity.position.z, minZ, maxZ);
-
+  this.WorldResetManager.clampPositionToDungeon(entity);
 }
 
 //helper for Update Ground Attacker
@@ -609,24 +451,10 @@ snapEntityToWalkableTile(entity) {
 *The function checks if the character is within the bounds of maze 2, and if so, quantizes their position to find the corresponding tile and checks its type.
 *@returns {boolean} true if the player is on a safe tile, false otherwise
 */
+
+//this is a wrapper...
 isPlayerOnSafeTile() {
-  
-  if (!this.main_character) return false;
-
-  const inMap2 =
-    this.main_character.position.x >= this.map2Offset.x + this.map2.minX &&
-    this.main_character.position.x <= this.map2Offset.x + this.map2.minX + this.map2.cols * this.map2.tileSize &&
-    this.main_character.position.z >= this.map2.minZ &&
-    this.main_character.position.z <= this.map2.minZ + this.map2.rows * this.map2.tileSize;
-
-  if (!inMap2) return false;
-
-  const localPos = this.main_character.position.clone().sub(this.map2Offset);
-  const tile = this.map2.quantize(localPos);
-
-  if (!tile) return false;
-
-  return tile.type === Tile.Type.MediumTerrain;
+  return this.worldCollisionManager.isPlayerOnSafeTile();
 }
 
 
@@ -635,54 +463,9 @@ isPlayerAtUnlockedControllerExit() {
   return this.controllerExitManager.isPlayerAtUnlockedControllerExit();
 }
 
-// restart
-/*
-*purpose: reset the game state to its initial conditions by clearing all entities from the scene, resetting all game variables to their default values, 
- and preparing the world for a new playthrough. 
-*This function is called when the player chooses to restart the game after a game over, and ensures that all previous state is cleared and the game can start fresh.
-*@returns null
-*/ 
+// restart world wrapper 
 reset() {
-  
-  while (this.scene.children.length > 0) {
-
-    this.scene.remove(this.scene.children[0]);
-  }
-
-  this.entities = [];
-  this.ground_attackers = [];
-  this.goals = [];
-  this.npcs = [];
-  this.drones = [];
-  this.energyCells = [];
-  this.mixers = [];
-  this.collectedEnergyCells = 0;
-  this.totalEnergyCells = 0;
-  this.energyCellsRequiredForUnlock = 0;
-  this.controllerExit = null;
-  this.controllerExitTile = null;
-  this.controllerExitUnlocked = false;
-  this.controllerExitReached = false;
-
-  this.main_character = null;
-  this.groundVectorPathFinding = null;
-  this.droneHierarchicalPathfinder = null;
-  this.mazeGroup1 = null;
-  this.mazeGroup2 = null;
-  this.hallwayMesh = null;
-  this.loadingSprite = null;
-  this.hallwayBounds = null;
-
-  this.dungeonGroup = null;
-  this.dungeonRenderer = null;
-  this.dungeonGuard = null;
-  this.dungeonPatrolTiles = [];
-  this.dungeonPatrolPath = [];
-  this.dungeonPatrolLine = null;
-  this.dungeonMap = null;
-  this.hallwayMesh2 = null;
-  this.hallwayBounds2 = null;
-  this.dungeonOffset = null;
+  this.WorldResetManager.reset();
 }
 
   // Update our world
