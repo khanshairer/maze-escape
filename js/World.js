@@ -5,8 +5,8 @@ import { DebugVisuals } from './debug/DebugVisuals.js'; // for deugging purposes
 import { ControllerExitManager } from './gameLogic/ControllerExitManager.js';
 import { WorldInitializer } from './gameLogic/WorldInitializerManager.js';
 import { WorldCollisionManager } from './gameLogic/WorldCollisionManager.js';
-import { WorldResetManager } from './gameLogic/WorldResetManager.js'; // ADDED missing import
-
+import { WorldResetManager } from './gameLogic/WorldResetManager.js'; 
+import { WorldUpdateManager } from './gameLogic/WorldUpdateManager.js';
 /**
  * World class holds all information about our game's world
  */
@@ -25,7 +25,7 @@ export class World {
     // manager
     this.WorldResetManager = new WorldResetManager(this);
     this.worldCollisionManager = new WorldCollisionManager(this);
-
+    this.WorldUpdateManager = new WorldUpdateManager(this);
     // added ................
     this.droneRespawnDelay = 0.8;
     this.controllerExitManager = new ControllerExitManager(this);
@@ -291,102 +291,9 @@ reset() {
   Finally, it updates the camera to follow the main character and logs the character's position for debugging purposes.
 *@returns null
 */
+ // wrapper 
   update() {
-  if (this.isGameOver) {
-    for (let mixer of this.mixers) {
-      mixer.stopAllAction();
-    }
-
-    if (this.mainCharacterMixer) {
-      this.mainCharacterMixer.stopAllAction();
-    }
-
-    return;
-  }
-
-  if (!this.main_character) return;
-
-  let dt = this.clock.getDelta();
-
-  if (!this.loadingComplete) {
-    if (this.mainCharacterMixer) {
-      this.mainCharacterMixer.update(dt);
-    }
-
-    for (let mixer of this.mixers) {
-      mixer.update(dt);
-    }
-
-    return;
-  }
-
-  // Update main character movement and animation
-  this.mainCharacterManager.updateMainCharacter(dt);
-  this.dungeonGuardManager.updateDungeonGuard(dt);
-  // Update main character animation mixer if present
-  if (this.mainCharacterMixer) {
-    
-    this.mainCharacterMixer.update(dt);
-  
-  }
-
-  // Update animation mixers for loaded boats
-  for (let mixer of this.mixers) {
-    
-    mixer.update(dt);
-  
-  }
-
-  //updateGroundAttacker with new steering behaviours
-  this.groundAttackerManager.update();
-  this.droneManager.update(dt);
-  
-
-  // Update all entities (this includes the main character)
-  for (let e of this.entities) {
-    
-    if (e === this.dungeonGuard) continue;
-
-    if (e.update) {
-      
-      e.update(dt, this.getMapAdapterForPosition(e.position));
-    
-    }
-  }
-
-  this.energyCellManager.updateEnergyCells(dt);
-  this.controllerExitManager.updateControllerExitState(dt);
-
-  // keep player stable inside dungeon bounds
-  if (this.main_character) {
-    const pos = this.main_character.position;
-
-    const inDungeon =
-      pos.x >= this.dungeonOffset.x + this.dungeonMap.minX &&
-      pos.x <= this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize &&
-      pos.z >= this.dungeonMap.minZ &&
-      pos.z <= this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize;
-
-    if (inDungeon) {
-      const minX = this.dungeonOffset.x + this.dungeonMap.minX + 0.1;
-      const maxX = this.dungeonOffset.x + this.dungeonMap.minX + this.dungeonMap.cols * this.dungeonMap.tileSize - 0.1;
-      const minZ = this.dungeonMap.minZ + 0.1;
-      const maxZ = this.dungeonMap.minZ + this.dungeonMap.rows * this.dungeonMap.tileSize - 0.1;
-
-      this.main_character.position.x = THREE.MathUtils.clamp(this.main_character.position.x, minX, maxX);
-      this.main_character.position.z = THREE.MathUtils.clamp(this.main_character.position.z, minZ, maxZ);
-    }
-  }
-
-  // Update camera to follow main character
-  this.mainCharacterManager.updateCameraFollow();
-
-  // Final position logging (once per second)
-  if (!this.finalLogCounter) this.finalLogCounter = 0;
-  this.finalLogCounter++;
-  if (this.finalLogCounter >= 60) {
-    this.finalLogCounter = 0;
-  }
+    this.WorldUpdateManager.update();
 }
 
   // Render our world
