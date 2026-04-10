@@ -1,7 +1,7 @@
 # Project Title
 Robot Maze Escape AI System
 
-Robot Maze Escape is a three-stage AI game built with three.js. The player travels through Maze 1, Maze 2, and a final dungeon while interacting with multiple AI systems, including finite state machines, steering behaviours, flow-field navigation, Jump Point Search, and procedural content generation.
+Robot Maze Escape is a three-stage AI game built with three.js. The player travels through Maze(map 1), Perlin(map 2), and a final dungeon(map 3) while interacting with multiple AI systems, including finite state machines, steering behaviours, flow-field navigation, Jump Point Search, and procedural content generation.
 
 ---
 
