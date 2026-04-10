@@ -7,7 +7,6 @@ Robot Maze Escape is a three-stage AI game built with three.js. The player trave
 
 # YouTube Demo Video
 - Link: [https://youtu.be/S_kUdUqbpb0]
-  The video shows the full gameplay flow, including maze navigation, enemy behavior, energy-cell collection, and the final controller room objective.
 
 ---
 
@@ -32,19 +31,13 @@ Robot Maze Escape is a three-stage AI game built with three.js. The player trave
 
 ---
 
-# How to Play
+# Main Gameplay Objective
 
-Move through the world with `W`, `A`, `S`, and `D`. Movement is relative to the camera, so the player moves in the direction the camera is facing. Press `Space` to jump when you need extra movement control.
-
-The main objective is to collect energy cells, unlock the controller room, and escape through the final exit. The controller room unlocks after collecting 80% of the spawned energy cells (turns green when unlocked), so the player needs to explore the world instead of rushing straight to the end.
-
-In Maze 1, the ground attackers follow a shared flow field toward the exit corridor. They create continuous pressure by moving toward the same goal area, and the player must avoid contact with them.
-
-In Maze 2, drones use a finite state machine: patrol, alert, chase, search, and return. Green safe tiles prevent drone detection and interrupt ongoing alert or chase behavior. Green tiles are visually distinct in the maze and indicate safe zones where drones cannot detect or chase the player. When the player leaves a safe tile, the drones resume normal detection behavior.
-
-The drone visual system helps show the current state. Blue/cyan means patrol, yellow/orange means alert or search, red means chase and danger, and white/cyan means return. The detection circle color is tied to the active FSM state.
-
-In the dungeon, the guard patrols a loop using Reynolds Path Following and can chase the player when the player gets too close. The final goal is to reach the controller room exit after it has been unlocked.
+The player must:
+1. survive enemy pressure across all three areas,
+2. collect energy cells distributed throughout the world,
+3. unlock the controller exit in the dungeon,
+4. reach the unlocked controller room to win.
 
 The game ends in two ways:
 - **Loss:** the player is caught by a ground attacker, a drone in its dangerous chase state, or the dungeon guard.
