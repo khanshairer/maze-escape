@@ -414,11 +414,11 @@ We can make multiple level by tuning the map creation parameter in world init or
 
 # Contributors
 
-Mamun Rashid  
+Mamun Rashid (201960713)   
 
-Shahrier Khan  
+Shahrier Khan (201856192)   
 
-Please find the CONTRIBUTIONS.md file for detailed report in project root.
+Please find the CONTRIBUTIONS.md file for detailed report in project root.   
 
 
 ---
