@@ -6,7 +6,7 @@ Robot Maze Escape is a three-stage AI game built with three.js. The player cross
 ---
 
 # YouTube Demo Video
-- Link: [PASTE VIDEO LINK HERE]
+- Link: [https://youtu.be/m4wiBuLuVY8]
 
 ---
 
