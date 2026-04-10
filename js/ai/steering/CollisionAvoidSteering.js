@@ -117,63 +117,69 @@ export class CollisionAvoidSteering {
   // avoid a round obstacle
   static round(entity, obstacle, lookAhead, howFar, debug) {
 
-    let steer = new THREE.Vector3();
+  let steer = new THREE.Vector3();
 
-    // First, get the future location of our character
-    let predictedChange = entity.velocity.clone().multiplyScalar(lookAhead);
-    let predictedLocation = entity.position.clone().add(predictedChange);
+  // Safe debug – if debug is null/undefined, use a dummy that does nothing
+  const safeDebug = debug || {
+    showLine: () => {},
+    showSphere: () => {},
+    hideObjs: () => {}
+  };
 
-    // show via a line
-    debug.showLine("predictedLocation", entity.position, predictedLocation, 'black');
+  // First, get the future location of our character
+  let predictedChange = entity.velocity.clone().multiplyScalar(lookAhead);
+  let predictedLocation = entity.position.clone().add(predictedChange);
 
-    // Get the closest point on the line segment from 
-    // our entity --> it's predicted location
-    // to the center of the round obstacle 
-    let closestPoint = CollisionAvoidSteering.getClosestPointOnSegment(
-        entity.position,
-        predictedLocation,
-        obstacle.position
+  // show via a line
+  safeDebug.showLine("predictedLocation", entity.position, predictedLocation, 'black');
+
+  // Get the closest point on the line segment from 
+  // our entity --> it's predicted location
+  // to the center of the round obstacle 
+  let closestPoint = CollisionAvoidSteering.getClosestPointOnSegment(
+      entity.position,
+      predictedLocation,
+      obstacle.position
+    );
+
+  // show via a sphere
+  safeDebug.showSphere("closestPoint", closestPoint);
+
+  // Check to see if there is a collision
+  let isCollision =
+    closestPoint.distanceTo(obstacle.position) <= obstacle.radius;
+
+  let collisionPoint = new THREE.Vector3();
+  let target = new THREE.Vector3();
+
+  if (isCollision) {
+    collisionPoint = CollisionAvoidSteering.getLineCircleCollisionPoint(
+        entity.position, 
+        predictedLocation, 
+        obstacle.position, 
+        obstacle.radius
       );
 
-    // show via a sphere
-    debug.showSphere("closestPoint", closestPoint);
+    // Get the avoid target
+    target = CollisionAvoidSteering.getAvoidTarget(collisionPoint, obstacle, howFar);
 
+    steer = SteeringBehaviours.seek(entity, target);
 
-    // Check to see if there is a collision
-    let isCollision =
-      closestPoint.distanceTo(obstacle.position) <= obstacle.radius;
+    // show line in yellow
+    // safeDebug.showLine("predictedLocation", entity.position, predictedLocation, 'yellow');
 
-    let collisionPoint = new THREE.Vector3();
-    let target = new THREE.Vector3();
+    // show via spheres
+    safeDebug.showSphere("collisionPoint", collisionPoint);
+    safeDebug.showSphere("target", target);
 
-    if (isCollision) {
-      collisionPoint = CollisionAvoidSteering.getLineCircleCollisionPoint(
-          entity.position, 
-          predictedLocation, 
-          obstacle.position, 
-          obstacle.radius
-        );
-
-      // Get the avoid target
-      target = CollisionAvoidSteering.getAvoidTarget(collisionPoint, obstacle, howFar);
-
-      steer = SteeringBehaviours.seek(entity, target);
-
-      // show line in yellow
-      // debug.showLine("predictedLocation", entity.position, predictedLocation, 'yellow');
-
-      // show via spheres
-      debug.showSphere("collisionPoint", collisionPoint);
-      debug.showSphere("target", target);
-
-    }
-    else {
-      // hide unnecessary spheres
-      debug.hideObjs(["collisionPoint", "target"]);
-    }
-
-    return steer;
   }
+  else {
+    // hide unnecessary spheres
+    safeDebug.hideObjs(["collisionPoint", "target"]);
+  }
+
+  return steer;
+}
 
   // Get the avoid target
   static getAvoidTarget(collisionPoint, obstacle, howFar) {

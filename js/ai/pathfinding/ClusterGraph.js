@@ -77,7 +77,7 @@ export class ClusterGraph {
       const leftTile = this.map.grid[row][boundaryCol];
       const rightTile = this.map.grid[row][boundaryCol + 1];
 
-      if (leftTile.isWalkable() && rightTile.isWalkable()) {
+      if (this.tilesAreDirectlyConnected(leftTile, rightTile)) {
         currentEntrance.push({
           clusterAId: leftClusterId,
           clusterBId: rightClusterId,
@@ -109,7 +109,7 @@ export class ClusterGraph {
       const topTile = this.map.grid[boundaryRow][col];
       const bottomTile = this.map.grid[boundaryRow + 1][col];
 
-      if (topTile.isWalkable() && bottomTile.isWalkable()) {
+      if (this.tilesAreDirectlyConnected(topTile, bottomTile)) {
         currentEntrance.push({
           clusterAId: topClusterId,
           clusterBId: bottomClusterId,
@@ -123,6 +123,18 @@ export class ClusterGraph {
     }
 
     this.commitEntrance(topClusterId, bottomClusterId, currentEntrance);
+  }
+
+  tilesAreDirectlyConnected(tileA, tileB) {
+    if (!tileA || !tileB) {
+      return false;
+    }
+
+    if (!tileA.isWalkable() || !tileB.isWalkable()) {
+      return false;
+    }
+
+    return this.map.getNeighbours(tileA).includes(tileB);
   }
 
   commitEntrance(clusterAId, clusterBId, entrance) {

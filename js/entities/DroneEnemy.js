@@ -1,11 +1,10 @@
 import * as THREE from 'three';
 import { DynamicEntity } from './DynamicEntity.js';
 import { StateMachine } from '../ai/decisions/state-machines/StateMachine.js';
-import { PatrolState } from '../ai/decisions/state-machines/DroneStates.js';
+import { PatrolState } from '../ai/decisions/state-machines/PatrolState.js';
 import { GroupSteeringBehaviours } from '../ai/steering/GroupSteeringBehaviours.js';
 import { CollisionAvoidSteering } from '../ai/steering/CollisionAvoidSteering.js';
-import { Path } from '../maps/Path.js';
-import { PathFollowSteering } from '../ai/steering/PathFollowSteering.js';
+import { SteeringBehaviours } from '../ai/steering/SteeringBehaviours.js';
 
 /*
 
@@ -42,40 +41,39 @@ export class DroneEnemy extends DynamicEntity {
     this.alertDuration = alertDuration;
 
     this.lastKnownPlayerPosition = null;
-    this.currentPath = [];
-    this.currentPathIndex = 0;
-    this.pathTarget = null;
     this.respawnTimer = 0;
     this.stateTag = 'patrol';
     this.alertTimer = 0;
     this.searchTimer = 0;
     this.fsm = null;
     this.fsmData = null;
+
     this.wanderAngle = Math.random() * Math.PI * 2;
-    this.wanderDistance = 3.2;
-    this.wanderRadius = 1.7;
-    this.wanderJitter = 0.55;
-    this.patrolRadius = 4.5;
-    this.softPatrolRadius = 2.5;
+    //stronger
+    this.wanderDistance = 5.5;
+    this.wanderRadius = 3.0;
+    this.wanderJitter = 0.9;
+
+    this.patrolSpeed = 3.0;
+    this.alertSpeed = 4.5;
+    this.chaseSpeed = 6.8;
+    this.searchSpeed = 3.8;
+
     this.primarySteeringWeight = 1;
-    this.separationRadius = 2.25;
-    this.separationWeight = 1.15;
-    this.boundsAvoidLookAhead = 1.35;
-    this.boundsAvoidMargin = 1.35;
-    this.boundsAvoidWeight = 0.9;
-    this.wallAvoidLookAhead = 1.05;
-    this.wallAvoidProbeOffset = 0.95;
-    this.wallAvoidWeight = 0.8;
-    this.hierarchicalPathfinder = null;
-    this.pathFollower = null;
-    this.pathStateTag = null;
-    this.pathTargetPosition = null;
-    this.pathTargetClusterId = null;
-    this.pathStartTileKey = null;
-    this.pathRefreshTimer = 0;
-    this.pathRefreshInterval = 0.35;
-    this.pathRecomputeDistance = 3;
-    this.pathFollowThreshold = 0.8;
+    this.separationRadius = 2.6;
+    this.separationWeight = 0.95;
+
+    this.whiskerLookAhead = 3.2;
+    this.whiskerSideLookAhead = 2.4;
+    this.whiskerAngle = Math.PI / 6;
+    this.wallAvoidWeight = 12.0;
+
+    this.droneAvoidLookAhead = 6.4;
+    this.droneAvoidHowFar = 6.2;
+    this.droneAvoidWeight = 12.1;
+
+    this.wanderTarget = null;
+    this.searchTarget = null;
 
     this.modelLoaded = false;
     this.boatLoaded = false;
@@ -125,7 +123,6 @@ export class DroneEnemy extends DynamicEntity {
     
     }
 
-    this.pathRefreshTimer = Math.max(0, this.pathRefreshTimer - dt);
     this.fsm.update(dt);
   }
 
@@ -201,217 +198,59 @@ and other relevant properties.
   
   }
 
+  /*
+  Purpose: getWanderForce is a method that returns a wandering steering force for the DroneEnemy,
+  allowing it to move freely around the Perlin map using SteeringBehaviours.wander.
   
-  /*
-  Purpose: setPathfinder is a method that sets the hierarchical pathfinder for the DroneEnemy,
-  allowing it to compute paths through the game world.
-
-  Parameters: pathfinder - the hierarchical pathfinder instance that the DroneEnemy will use for pathfinding.
-  */
-  setPathfinder(pathfinder) {
-    
-    this.hierarchicalPathfinder = pathfinder;
-  }
-
-  /*
-  Purpose: getCurrentTile is a method that returns the current tile that the DroneEnemy is occupying in the patrol map,
-  allowing it to determine its position relative to the patrol area and make decisions based on its location.
   Parameters: None
   */
-  getCurrentTile() {
+  getWanderForce() {
     
-    return this.patrolMap ? this.patrolMap.quantize(this.position) : null;
-  
-  }
-
-  /*
-  Purpose: getTileKey is a method that returns a unique key for a given tile, which can be used for efficient lookup and comparison.
-  Parameters: tile - the tile for which to generate a key.
-  */
-  getTileKey(tile) {
-    
-    return tile ? `${tile.row},${tile.col}` : null;
-  
-  }
-
-  /*
-  Purpose: clearNavigationPath is a method that resets all properties related to the current navigation path of the DroneEnemy,
-  allowing it to start fresh when computing a new path or transitioning between states in the FSM.
-  Parameters: None
-  */
-  clearNavigationPath() {
-    
-    this.currentPath = [];
-    this.currentPathIndex = 0;
-    this.pathTarget = null;
-    this.pathFollower = null;
-    this.pathStateTag = null;
-    this.pathTargetPosition = null;
-    this.pathTargetClusterId = null;
-    this.pathStartTileKey = null;
-    this.pathRefreshTimer = 0;
-  }
-
- /*
-  Purpose: shouldRecomputePath is a method that determines whether the DroneEnemy needs to recompute its navigation path to the target 
-  position,
- Parameters: targetPosition - the position that the DroneEnemy is trying to navigate to, stateTag - 
- a tag representing the current state of the FSM,
-  
- */ 
-  shouldRecomputePath(targetPosition, stateTag) {
-    
-    if (!this.hierarchicalPathfinder || !this.patrolMap || !targetPosition) {
-      
-      return false;
-    
-    }
-
-    const startTile = this.getCurrentTile();
-    const targetTile = this.patrolMap.quantize(targetPosition);
-
-    if (!startTile || !targetTile || !targetTile.isWalkable()) {
-      
-      return false;
-    
-    }
-
-    if (!this.pathFollower || this.pathFollower.path.size() === 0) {
-      
-      return true;
-    
-    }
-
-    if (this.pathStateTag !== stateTag) {
-      
-      return true;
-    
-    }
-
-    const targetClusterId = this.hierarchicalPathfinder.getClusterIdForTile(targetTile);
-    
-    if (this.pathTargetClusterId !== targetClusterId) {
-      
-      return true;
-    
-    }
-
-    if (!this.pathTargetPosition) {
-      
-      return true;
-    
-    }
-
-    if (this.pathTargetPosition.distanceTo(targetPosition) > this.pathRecomputeDistance) {
-      
-      return true;
-    
-    }
-
-    if (this.pathFollower.index >= this.pathFollower.path.size() - 1) {
-      
-      const lastPoint = this.pathFollower.path.get(this.pathFollower.path.size() - 1);
-      
-      if (!lastPoint || this.position.distanceTo(lastPoint) > this.pathFollowThreshold) {
-        
-        return true;
-      
-      }
-    }
-
-    return false;
-  }
-
-  
-  /*
-  Purpose: ensureHierarchicalPath is a method that checks if the DroneEnemy has a valid navigation path to the target position 
-  and computes a new path if necessary,
-  
-  Parameters: targetPosition - the position that the DroneEnemy is trying to navigate to, stateTag -
-   a tag representing the current state of the FSM,
-  */
-  ensureHierarchicalPath(targetPosition, stateTag) {
-    
-    if (!this.hierarchicalPathfinder || !this.patrolMap || !targetPosition) {
-      
-      return false;
-    
-    }
-
-    const startTile = this.getCurrentTile();
-    const targetTile = this.patrolMap.quantize(targetPosition);
-
-    if (!startTile || !targetTile || !targetTile.isWalkable()) {
-      
-      return false;
-    
-    }
-
-    if (!this.shouldRecomputePath(targetPosition, stateTag)) {
-      
-      return !!this.pathFollower && this.pathFollower.path.size() > 0;
-    
-    }
-
-    if (this.pathRefreshTimer > 0) {
-      
-      return !!this.pathFollower && this.pathFollower.path.size() > 0;
-    
-    }
-
-    const tilePath = this.hierarchicalPathfinder.findPath(startTile, targetTile, this.patrolMap);
-    this.pathRefreshTimer = this.pathRefreshInterval;
-
-    if (!tilePath || tilePath.length === 0) {
-      
-      return false;
-    
-    }
-
-    const positionPath = new Path({
-      
-      points: tilePath.map((tile) => this.patrolMap.localize(tile)),
-      radius: this.pathFollowThreshold
-    
+    return SteeringBehaviours.wander(this, {
+      distance: this.wanderDistance,
+      radius: this.wanderRadius,
+      jitter: this.wanderJitter
     });
-
-    this.currentPath = tilePath;
-    this.currentPathIndex = 0;
-    this.pathFollower = { path: positionPath, index: 0 };
-    this.pathStateTag = stateTag;
-    this.pathTargetPosition = targetPosition.clone();
-    this.pathTargetClusterId = this.hierarchicalPathfinder.getClusterIdForTile(targetTile);
-    this.pathStartTileKey = this.getTileKey(startTile);
-    this.pathTarget = targetPosition.clone();
-
-    return true;
   }
 
   /*
-  Purpose: getHierarchicalPathForce is a method that calculates the steering force for the DroneEnemy to follow its current navigation path,
-  allowing it to move towards its target position while navigating around obstacles and other entities in the game world.
+  Purpose: getSeekForce is a method that returns a direct seek steering force toward a target position.
   
-  Parameters: None
+  Parameters: targetPosition - the position that the DroneEnemy should seek.
   */
-  getHierarchicalPathForce() {
+  getSeekForce(targetPosition) {
     
-    if (!this.pathFollower || this.pathFollower.path.size() === 0) {
+    if (!targetPosition) {
       
-      return null;
+      return new THREE.Vector3();
     
     }
 
-    return PathFollowSteering.simple(this, this.pathFollowThreshold);
+    return SteeringBehaviours.seek(this, targetPosition);
   }
 
+  /*
+  Purpose: getPursueForce is a method that returns a pursue steering force toward the predicted future player location.
   
+  Parameters: player - the player character that the DroneEnemy is trying to pursue, lookAhead - how far ahead to predict.
+  */
+  getPursueForce(player, lookAhead = 0.35) {
+    
+    if (!player) {
+      
+      return new THREE.Vector3();
+    
+    }
+
+    return SteeringBehaviours.pursue(this, player, lookAhead);
+  }
+
   /*
   Purpose: getActivePeers is a method that returns an array of all active drone peers in the game world,
   excluding the current DroneEnemy instance.
   
   Parameters: world - the game world object containing the drone entities
   */
-
   getActivePeers(world) {
     
     if (!world || !Array.isArray(world.drones)) {
@@ -430,6 +269,234 @@ and other relevant properties.
   }
 
   /*
+  Purpose: getForwardVector is a method that returns the DroneEnemy's forward direction based on velocity,
+  falling back to mesh rotation if velocity is too small.
+  
+  Parameters: None
+  */
+  getForwardVector() {
+    
+    const forward = new THREE.Vector3(this.velocity.x, 0, this.velocity.z);
+
+    if (forward.lengthSq() > 0.0001) {
+      forward.normalize();
+      return forward;
+    }
+
+    const fallback = new THREE.Vector3(0, 0, 1);
+    fallback.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.mesh.rotation.y);
+    fallback.normalize();
+    return fallback;
+  }
+
+  /*
+  Purpose: rotateVectorY is a helper method that rotates a vector around the Y-axis by the given angle,
+  allowing the DroneEnemy to create left and right whisker directions.
+  
+  Parameters: vec - the vector to rotate, angle - the rotation angle in radians.
+  */
+  rotateVectorY(vec, angle) {
+    
+    return vec.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+  }
+
+  /*
+  Purpose: getWallSegments is a method that returns the outer boundary wall segments of the patrol map
+  in local map space so whisker collision detection can test against them.
+  
+  Parameters: None
+  */
+  getWallSegments() {
+    
+    if (!this.patrolMap) {
+      return [];
+    }
+
+    const minX = this.patrolMap.minX;
+    const maxX = this.patrolMap.minX + this.patrolMap.cols * this.patrolMap.tileSize;
+    const minZ = this.patrolMap.minZ;
+    const maxZ = this.patrolMap.minZ + this.patrolMap.rows * this.patrolMap.tileSize;
+
+    return [
+      {
+        start: new THREE.Vector3(minX, 0, minZ),
+        end: new THREE.Vector3(maxX, 0, minZ)
+      },
+      {
+        start: new THREE.Vector3(maxX, 0, minZ),
+        end: new THREE.Vector3(maxX, 0, maxZ)
+      },
+      {
+        start: new THREE.Vector3(maxX, 0, maxZ),
+        end: new THREE.Vector3(minX, 0, maxZ)
+      },
+      {
+        start: new THREE.Vector3(minX, 0, maxZ),
+        end: new THREE.Vector3(minX, 0, minZ)
+      }
+    ];
+  }
+
+  /*
+  Purpose: getWhiskerWallAvoidForce is a method that uses forward, left, and right whiskers to proactively detect upcoming wall
+  collisions and steer the DroneEnemy away from them before it gets stuck in a corner.
+  
+  Parameters: data - an object containing world information needed to convert the DroneEnemy to patrolMap local space.
+  */
+  getWhiskerWallAvoidForce(data) {
+    
+    const world = data?.world;
+    if (!this.patrolMap || !world?.map2Offset) {
+      return new THREE.Vector3();
+    }
+
+    const localPos = this.position.clone().sub(world.map2Offset);
+    const forward = this.getForwardVector();
+
+    const whiskers = [
+      {
+        key: 'main',
+        dir: forward.clone(),
+        length: this.whiskerLookAhead
+      },
+      {
+        key: 'left',
+        dir: this.rotateVectorY(forward, this.whiskerAngle),
+        length: this.whiskerSideLookAhead
+      },
+      {
+        key: 'right',
+        dir: this.rotateVectorY(forward, -this.whiskerAngle),
+        length: this.whiskerSideLookAhead
+      }
+    ];
+
+    const wallSegments = this.getWallSegments();
+
+    let strongestForce = new THREE.Vector3();
+    let hitSomething = false;
+
+    for (let whisker of whiskers) {
+      const whiskerEnd = localPos.clone().add(whisker.dir.clone().multiplyScalar(whisker.length));
+
+      for (let wall of wallSegments) {
+        const collisionPoint = CollisionAvoidSteering.getLineLineCollisionPoint(
+          localPos,
+          whiskerEnd,
+          wall.start,
+          wall.end
+        );
+
+        if (!collisionPoint) {
+          continue;
+        }
+
+        hitSomething = true;
+
+        const wallDirection = wall.end.clone().sub(wall.start);
+        let wallNormal = new THREE.Vector3(-wallDirection.z, 0, wallDirection.x).normalize();
+
+        if (wallNormal.dot(whisker.dir) > 0) {
+          wallNormal.multiplyScalar(-1);
+        }
+
+        const pushBack = wallNormal.clone().multiplyScalar(this.wallAvoidWeight);
+
+        if (pushBack.lengthSq() > strongestForce.lengthSq()) {
+          strongestForce.copy(pushBack);
+        }
+      }
+    }
+
+    if (!hitSomething) {
+      return new THREE.Vector3();
+    }
+
+    return strongestForce;
+  }
+
+  /*
+  Purpose: getDroneAvoidForce is a method that uses round collision avoidance against other active drones so the DroneEnemy
+  can steer around peers without waiting for a collision overlap.
+  
+  Parameters: data - an object containing world information needed to access active peers and optional debug visuals.
+  */
+  getDroneAvoidForce(data) {
+    
+    const world = data?.world;
+    const peers = this.getActivePeers(world);
+
+    let totalForce = new THREE.Vector3();
+
+    for (let peer of peers) {
+      const obstacle = {
+        position: peer.position.clone(),
+        radius: this.separationRadius
+      };
+
+      const avoidForce = CollisionAvoidSteering.round(
+        this,
+        obstacle,
+        this.droneAvoidLookAhead,
+        this.droneAvoidHowFar,
+        null
+      );
+
+      totalForce.add(avoidForce);
+    }
+
+    return totalForce.multiplyScalar(this.droneAvoidWeight);
+  }
+
+  /*
+  Purpose: getUnstuckForce is a method that provides a small push away from tile edges or corners when the DroneEnemy
+  slows down too much near walls, helping it recover from deadlocks caused by separation and wall avoidance fighting each other.
+
+  Parameters: data - an object containing world information needed to convert the DroneEnemy to patrolMap local space.
+  */
+  getUnstuckForce(data) {
+    
+    const world = data?.world;
+    if (!this.patrolMap || !world?.map2Offset) {
+      return new THREE.Vector3();
+    }
+
+    const localPos = this.position.clone().sub(world.map2Offset);
+    const tile = this.patrolMap.quantize(localPos);
+
+    if (!tile) {
+      return new THREE.Vector3();
+    }
+
+    const center = this.patrolMap.localize(tile);
+    let force = new THREE.Vector3();
+
+    const edgeThreshold = this.patrolMap.tileSize * 0.28;
+
+    const nearNorth = localPos.z < center.z - edgeThreshold;
+    const nearSouth = localPos.z > center.z + edgeThreshold;
+    const nearWest = localPos.x < center.x - edgeThreshold;
+    const nearEast = localPos.x > center.x + edgeThreshold;
+
+    const speed2D = new THREE.Vector3(this.velocity.x, 0, this.velocity.z).length();
+
+    if (speed2D > 0.25) {
+      return force;
+    }
+
+    if (nearNorth) force.z += 1;
+    if (nearSouth) force.z -= 1;
+    if (nearWest) force.x += 1;
+    if (nearEast) force.x -= 1;
+
+    if (force.lengthSq() > 0.0001) {
+      force.normalize().multiplyScalar((this.maxForce ?? 1) * 1.6);
+    }
+
+    return force;
+  }
+
+  /*
   Purpose: computeAvoidanceSteering is a method that calculates the combined steering force for the DroneEnemy to avoid collisions with other
    entities and obstacles in the game world,allowing it to navigate safely while pursuing its target.
   */
@@ -444,21 +511,10 @@ and other relevant properties.
       this.separationRadius
     ).multiplyScalar(this.separationWeight);
 
-    const boundsForce = CollisionAvoidSteering.bounds(
-      this,
-      this.patrolMap,
-      this.boundsAvoidLookAhead,
-      this.boundsAvoidMargin
-    ).multiplyScalar(this.boundsAvoidWeight);
+    const droneAvoidForce = this.getDroneAvoidForce(data);
+    const wallAvoidForce = this.getWhiskerWallAvoidForce(data);
 
-    const wallForce = CollisionAvoidSteering.tileWalls(
-      this,
-      this.patrolMap,
-      this.wallAvoidLookAhead,
-      this.wallAvoidProbeOffset
-    ).multiplyScalar(this.wallAvoidWeight);
-
-    return separationForce.add(boundsForce).add(wallForce);
+    return separationForce.add(droneAvoidForce).add(wallAvoidForce);
   }
 
   /*
@@ -480,6 +536,12 @@ and other relevant properties.
     }
 
     combinedForce.add(this.computeAvoidanceSteering(data));
+    combinedForce.add(this.getUnstuckForce(data));
+
+    if (this.maxForce !== undefined) {
+      combinedForce.clampLength(0, this.maxForce * 1.8);
+    }
+
     this.applyForce(combinedForce);
   }
 
@@ -578,14 +640,14 @@ that determines the transparency of the detection circle.
  */
   setDetectionCircleColor(hexColor, opacity = 0.45) {
   
-  const ring = this.detectionCircle || this._pendingDetectionCircle;
-  
-  if (!ring || !ring.material) return;
+    const ring = this.detectionCircle || this._pendingDetectionCircle;
+    
+    if (!ring || !ring.material) return;
 
-  ring.material.color.setHex(hexColor);
-  ring.material.opacity = opacity;
-  ring.material.needsUpdate = true;
-}
+    ring.material.color.setHex(hexColor);
+    ring.material.opacity = opacity;
+    ring.material.needsUpdate = true;
+  }
 
 /*
 Purpose: resetToSpawn is a method that resets the DroneEnemy to its initial spawn position and state,
@@ -594,7 +656,7 @@ a challenge throughout the game.
 
 Parameters: spawnPosition - the position to which the DroneEnemy should be reset, typically the location of its spawn tile.
 */  
-resetToSpawn(spawnPosition) {
+  resetToSpawn(spawnPosition) {
     
     this.position.copy(spawnPosition);
     this.position.y = 1;
@@ -603,13 +665,11 @@ resetToSpawn(spawnPosition) {
     this.mesh.visible = true;
     this.respawnTimer = 0;
     this.lastKnownPlayerPosition = null;
-    this.currentPath = [];
-    this.currentPathIndex = 0;
-    this.pathTarget = null;
     this.stateTag = 'patrol';
     this.clearStateTimers();
     this.wanderAngle = Math.random() * Math.PI * 2;
-    this.clearNavigationPath();
+    this.wanderTarget = null;
+    this.searchTarget = null;
 
     if (this.fsm) {
       

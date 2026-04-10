@@ -12,7 +12,17 @@ export class HierarchicalAStar extends Pathfinder {
   constructor(map, { clusterSize = 5 } = {}) {
     super();
     this.map = map;
+    this.clusterSize = clusterSize;
     this.clusterGraph = new ClusterGraph(map, clusterSize);
+  }
+
+  /**
+   * Rebuild the hierarchical pathfinder for a new map.
+   * Use this when the tilemap changes (new level, procedural generation).
+   */
+  rebuild(map) {
+    this.map = map;
+    this.clusterGraph = new ClusterGraph(map, this.clusterSize);
   }
 
   // Get the cluster ID for a given tile by querying the cluster graph, which allows the pathfinder 

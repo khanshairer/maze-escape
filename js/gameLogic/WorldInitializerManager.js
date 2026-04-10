@@ -47,7 +47,18 @@ export class WorldInitializer {
   
   // ----- create two mazes -----
   this.world.map = new TileMap(3, { useMazeGenerator: true });// maze 1 is generated with algorithm 2 for more complexity and longer paths
-  this.world.map2 = new TileMap(3, { useMazeGenerator: true });// maze 2 is also generated with algorithm 2 for more complexity and longer paths
+  this.world.map2 = new TileMap(3, {
+  usePerlinGenerator: true,
+  perlinSize: 64,
+  baseFrequency: 0.08,
+  numOctaves: 4,
+  persistence: 0.5,
+  lacunarity: 2.0,
+  obstacleThreshold: 0.10,
+  difficultThreshold: 0.40,
+  mediumThreshold: 0.40
+});// maze 2 is now an open Perlin terrain so drones can wander more freely
+
   this.world.dungeonMap = new TileMap(2, { useMazeGenerator: false });
   DungeonGenerator.generate(this.world.dungeonMap, 4); // generate a dungeon with 4 rooms using the dungeon generator
    
@@ -156,6 +167,7 @@ export class WorldInitializer {
   });
   // render the second maze with fences as obstacles for more visual interest and to create more defined pathways and cover for the player as they navigate through maze 2, while also providing a consistent visual theme with the fence obstacles appearing throughout the world including in the first maze and dungeon
   this.world.tileMapRenderer2.render(this.world.mazeGroup2);
+ 
   
   // `----- render dungeon in the scene -----`
   this.world.dungeonGroup = new THREE.Group(); // to hold all the meshes for the dungeon and allow us to easily position the entire dungeon in the world with an offset so that it is placed to the right of the second maze with a gap in between for the hallway connection, while also keeping all the dungeon meshes organized under one parent group in the scene graph for better structure and easier management of the dungeon as a whole
@@ -190,6 +202,14 @@ export class WorldInitializer {
   // main character
   this.world.mainCharacterManager = new MainCharacter(this.world);
   this.world.mainCharacterManager.createMainCharacter();
+
+  // ========== NEW: Random spawn on a walkable tile in map (maze 1) ==========
+  const randomTile = this.world.map.getRandomWalkableTile();
+  const spawnPos = this.world.map.localize(randomTile);
+  spawnPos.y = 1; // ground level for main character
+  this.world.main_character.position.copy(spawnPos);
+  this.world.main_character.mesh.position.copy(spawnPos);
+  // =========================================================================
 
   // crreate 10 ground attackers
   this.world.groundAttackerManager = new GroundAttackers(this.world);
@@ -228,12 +248,14 @@ export class WorldInitializer {
 
   //create energy cells for unlocking controller exit
   this.world.energyCellManager = new EnergyCellManager(this.world);
-  this.world.energyCellManager.createEnergyCells(3);
+  this.world.energyCellManager.createEnergyCells(6);
 
   //this.createGoalsForMap(this.world.map2, this.world.map2Offset, 5);
   //this.createNPCsForMap(this.world.map2, this.world.map2Offset, 10);
-  this.world.energyCellManager.createEnergyCellsForMap(this.world.map2, this.world.map2Offset, 3);
+  this.world.energyCellManager.createEnergyCellsForMap(this.world.map2, this.world.map2Offset, 9);
   this.world.energyCellManager.createEnergyCellsForMap(this.world.dungeonMap, this.world.dungeonOffset, 3);
   this.world.controllerExitManager.updateEnergyUnlockRequirement();
   }
+
+  
 }
