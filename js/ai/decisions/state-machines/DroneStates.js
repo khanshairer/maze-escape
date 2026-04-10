@@ -18,6 +18,12 @@ function reacquireIfDetected(entity, data) {
   
   }
 
+  if (isPlayerSafe(data)) {
+    
+    return false;
+  
+  }
+
   if (entity.canDetectPlayer(player)) {
     
     entity.rememberPlayer(player.position);
@@ -27,6 +33,14 @@ function reacquireIfDetected(entity, data) {
   }
 
   return false;
+}
+
+function isPlayerSafe(data) {
+  
+  const world = data?.world;
+
+  return typeof world?.isPlayerOnSafeTile === 'function' &&
+    world.isPlayerOnSafeTile();
 }
 
 /*
@@ -52,6 +66,8 @@ export class PatrolState extends State {
     entity.topSpeed = 2.2;
     entity.clearStateTimers();
     entity.clearNavigationPath();
+    entity.setColor?.('blue');
+    entity.setDetectionCircleColor?.(0x66e0ff, 0.45);
   
   }
 
@@ -59,7 +75,7 @@ export class PatrolState extends State {
     
     const player = data.player;
     
-    if (player && entity.canDetectPlayer(player)) {
+    if (player && !isPlayerSafe(data) && entity.canDetectPlayer(player)) {
       
       entity.rememberPlayer(player.position);
       entity.fsm.change(new AlertState());
@@ -120,12 +136,21 @@ export class AlertState extends State {
     entity.topSpeed = 0;
     entity.alertTimer = entity.alertDuration;
     entity.clearNavigationPath();
+    entity.setColor?.('orange');
+    entity.setDetectionCircleColor?.(0xffdd55, 0.55);
   
   }
 
   update(entity, data, dt) {
     
     const player = data.player;
+
+    if (isPlayerSafe(data)) {
+      
+      entity.fsm.change(new PatrolState());
+      return;
+    
+    }
 
     if (player && entity.canDetectPlayer(player)) {
       
@@ -153,6 +178,8 @@ export class ChaseState extends State {
     entity.stateTag = 'chase';
     entity.topSpeed = 3.6;
     entity.clearNavigationPath();
+    entity.setColor?.('red');
+    entity.setDetectionCircleColor?.(0xff3333, 0.6);
   
   }
 
@@ -163,6 +190,13 @@ export class ChaseState extends State {
     if (!player) {
       
       entity.fsm.change(new ReturnState());
+      return;
+    
+    }
+
+    if (isPlayerSafe(data)) {
+      
+      entity.fsm.change(new PatrolState());
       return;
     
     }
@@ -193,6 +227,8 @@ export class SearchState extends State {
     entity.topSpeed = 2.8;
     entity.searchTimer = entity.searchDuration;
     entity.clearNavigationPath();
+    entity.setColor?.('orange');
+    entity.setDetectionCircleColor?.(0xffdd55, 0.35);
   
   }
 
@@ -242,6 +278,8 @@ export class ReturnState extends State {
     entity.stateTag = 'return';
     entity.topSpeed = 2.6;
     entity.clearNavigationPath();
+    entity.setColor?.('white');
+    entity.setDetectionCircleColor?.(0x66e0ff, 0.35);
   
   }
 

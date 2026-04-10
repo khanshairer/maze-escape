@@ -169,7 +169,36 @@ export class DroneEnemy extends DynamicEntity {
     
     }
 
-    return this.patrolMap.localize(this.homeTile);
+    return this.toPatrolMapWorldPosition(this.patrolMap.localize(this.homeTile));
+  }
+
+  /*
+  Purpose: getPatrolMapOffset returns the world offset used when the patrol map is placed inside the larger world.
+  This keeps HPA* and tile collision checks in map-local coordinates while the drone still moves in world coordinates.
+  */
+  getPatrolMapOffset() {
+    
+    const world = this.fsmData?.world;
+
+    if (world?.map2Offset && this.patrolMap === world.map2) {
+      
+      return world.map2Offset;
+    
+    }
+
+    return new THREE.Vector3(0, 0, 0);
+  }
+
+  toPatrolMapLocalPosition(position) {
+    
+    return position.clone().sub(this.getPatrolMapOffset());
+  
+  }
+
+  toPatrolMapWorldPosition(position) {
+    
+    return position.clone().add(this.getPatrolMapOffset());
+  
   }
 
   
@@ -220,7 +249,9 @@ and other relevant properties.
   */
   getCurrentTile() {
     
-    return this.patrolMap ? this.patrolMap.quantize(this.position) : null;
+    return this.patrolMap
+      ? this.patrolMap.quantize(this.toPatrolMapLocalPosition(this.position))
+      : null;
   
   }
 
@@ -268,7 +299,8 @@ and other relevant properties.
     }
 
     const startTile = this.getCurrentTile();
-    const targetTile = this.patrolMap.quantize(targetPosition);
+    const targetLocalPosition = this.toPatrolMapLocalPosition(targetPosition);
+    const targetTile = this.patrolMap.quantize(targetLocalPosition);
 
     if (!startTile || !targetTile || !targetTile.isWalkable()) {
       
@@ -339,7 +371,8 @@ and other relevant properties.
     }
 
     const startTile = this.getCurrentTile();
-    const targetTile = this.patrolMap.quantize(targetPosition);
+    const targetLocalPosition = this.toPatrolMapLocalPosition(targetPosition);
+    const targetTile = this.patrolMap.quantize(targetLocalPosition);
 
     if (!startTile || !targetTile || !targetTile.isWalkable()) {
       
@@ -370,7 +403,9 @@ and other relevant properties.
 
     const positionPath = new Path({
       
-      points: tilePath.map((tile) => this.patrolMap.localize(tile)),
+      points: tilePath.map((tile) => (
+        this.toPatrolMapWorldPosition(this.patrolMap.localize(tile))
+      )),
       radius: this.pathFollowThreshold
     
     });
@@ -444,15 +479,21 @@ and other relevant properties.
       this.separationRadius
     ).multiplyScalar(this.separationWeight);
 
+    const localMapEntity = {
+      ...this,
+      position: this.toPatrolMapLocalPosition(this.position),
+      velocity: this.velocity
+    };
+
     const boundsForce = CollisionAvoidSteering.bounds(
-      this,
+      localMapEntity,
       this.patrolMap,
       this.boundsAvoidLookAhead,
       this.boundsAvoidMargin
     ).multiplyScalar(this.boundsAvoidWeight);
 
     const wallForce = CollisionAvoidSteering.tileWalls(
-      this,
+      localMapEntity,
       this.patrolMap,
       this.wallAvoidLookAhead,
       this.wallAvoidProbeOffset
