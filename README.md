@@ -427,19 +427,11 @@ After unlocking the controller room, enter the exit to win. Press `R` on the win
 
 # Contributors
 
-Mamun Rashid  
-- Drone FSM implementation and cleanup
-- Flow-field logic cleanup and consistency fixes
-- Hierarchical pathfinding integration
-- Final debugging and gameplay fixes
-- README writing and polishing
+Mamun Rashid (201960713)   
 
-Shahrier Khan  
-- Initial world and manager architecture refactor
-- Ground attacker system
-- Dungeon guard system, including Reynolds and JPS integration
-- Procedural generation systems for maze and dungeon layouts
-- Base gameplay structure
+Shahrier Khan (201856192)   
+
+Please find the CONTRIBUTIONS.md file for detailed report in project root.   
 
 ---
 
