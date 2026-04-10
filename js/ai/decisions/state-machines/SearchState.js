@@ -3,6 +3,9 @@ import { State } from './State.js';
 import { AlertState } from './AlertState.js';
 import { PatrolState } from './PatrolState.js';
 
+ /*
+  Purpose : Represent FSM SearchState
+ */
 export class SearchState extends State {
 
   enter(entity, data) {

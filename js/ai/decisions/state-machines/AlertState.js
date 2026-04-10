@@ -2,6 +2,9 @@ import { State } from './State.js';
 import { ChaseState } from './ChaseState.js';
 import { SearchState } from './SearchState.js';
 
+/*
+Purpose : Represent FSM Alter State..
+*/
 export class AlertState extends State {
 
   enter(entity, data) {

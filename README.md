@@ -1,12 +1,12 @@
 # Project Title
 Robot Maze Escape AI System
 
-Robot Maze Escape is a three-stage AI game built with three.js. The player crosses two procedurally generated mazes and a final dungeon while the project demonstrates steering, finite state machines, hierarchical pathfinding, Jump Point Search, flow-field navigation, and procedural content generation.
+Robot Maze Escape is a three-stage AI game built with three.js. The player travels through Maze(map 1), Perlin(map 2), and a final dungeon(map 3) while interacting with multiple AI systems, including finite state machines, steering behaviours, flow-field navigation, Jump Point Search, and procedural content generation.
 
 ---
 
 # YouTube Demo Video
-- Link: [https://youtu.be/m4wiBuLuVY8]
+- Link: [https://youtu.be/S_kUdUqbpb0]
 
 ---
 
@@ -26,22 +26,42 @@ Robot Maze Escape is a three-stage AI game built with three.js. The player cross
 # Controls
 - `W`, `A`, `S`, `D` move the player relative to the camera.
 - `Space` jumps.
+- Jump and move at the same time to escape the ground attackers in maze-1
 - `R` restarts after a loss or a win.
 
 ---
 
 # Project Overview
 
-The game is structured as a progression through three connected spaces: Maze 1, Maze 2, and a final dungeon that contains the controller room exit. The player starts in the first maze, crosses into the second maze, then reaches the dungeon and escapes only after enough energy cells have been collected.
+The game is organised as a connected three-area progression:
+- **Maze 1** introduces group pressure through ground attackers.
+- **Maze 2** focuses on drone decision making and local steering behaviour.
+- **The dungeon** contains the controller-room exit and a patrol guard.
 
-The main objective is to collect energy cells and unlock the controller room exit. The current implementation requires **80% of all spawned energy cells** before the controller room can be activated. This value is set in `js/World.js` through `unlockRequirementFraction = 0.8`. This higher threshold was chosen to force real exploration across all three spaces instead of letting the player skip most of the level and rush the ending.
+The player begins in Maze 1, crosses into Maze 2, then enters the dungeon. However, reaching the dungeon is not enough to win. The player must collect enough energy cells to unlock the controller exit before escape is possible.
 
-Each area uses different AI to create different gameplay pressure:
-- Maze 1 uses ground attackers that follow a flow field toward the exit corridor, creating constant pressure and crowd movement.
-- Maze 2 uses drones with a class-based FSM and hierarchical pathfinding so they patrol, detect, chase, search, and return.
-- The dungeon uses a guard that patrols a loop with Reynolds Path Following and uses Jump Point Search to build that patrol route efficiently.
+The unlocking rule is controlled by `unlockRequirementFraction = 0.8` in `js/World.js`, meaning the player must collect **80% of all spawned energy cells**. This requirement encourages exploration across the full environment rather than allowing a direct rush to the end.
 
-This gives each zone a different AI identity instead of repeating the same enemy logic across the whole game.
+A major design goal of the project is to give each area a different AI identity:
+- **Maze 1** uses flow-field navigation for ground attackers.
+- **Maze 2** uses a class-based finite state machine for drones, combined with steering and avoidance.
+- **The dungeon** uses Jump Point Search to build a patrol loop and Reynolds Path Following to move the guard smoothly along that loop.
+
+This separation makes the game easier to explain academically and also makes the gameplay more varied.
+
+---
+
+# Main Gameplay Objective
+
+The player must:
+1. survive enemy pressure across all three areas,
+2. collect energy cells distributed throughout the world,
+3. unlock the controller exit in the dungeon,
+4. reach the unlocked controller room to win.
+
+The game ends in two ways:
+- **Loss:** the player is caught by a ground attacker, a drone in its dangerous chase state, or the dungeon guard.
+- **Win:** the player reaches the controller exit after the required number of energy cells(80% for this version) has been collected.
 
 ---
 
@@ -52,22 +72,22 @@ This gives each zone a different AI identity instead of repeating the same enemy
 ### Reynolds Path Following
 
 **What:**  
-This is the movement system used by the dungeon guard when it is not directly chasing the player. It predicts a future position, projects that point onto the current path segment, checks deviation from the path, and steers toward a point ahead on the loop.
+Reynolds Path Following is used for the dungeon guard during patrol. Instead of jumping from one waypoint to the next, the guard predicts its future position, projects toward the patrol path, and steers smoothly along the loop.
 
 **Where:**  
 - `js/ai/steering/ReynoldsPathFollowing.js`
 - `js/entities/DungeonGuard.js`
 
 **How to observe:**  
-Reach the dungeon and watch the guard patrol around the room loop. The guard follows a continuous loop smoothly rather than snapping from waypoint to waypoint.
+Reach the dungeon and watch the guard before it notices the player. Its movement follows a continuous loop rather than a simple stop-and-turn waypoint pattern.
 
 **Why used:**  
-Reynolds Path Following matches the course material well for smooth patrol behavior. It was a better fit than simple waypoint seeking because the guard needed to move continuously around a looped patrol route and still look stable when turning corners.
+This was a suitable movement algorithm for a guard patrol because the dungeon needed motion that looked smooth and continuous. It also matches the course theme of steering-based movement well.
 
-### Collision Avoidance / Steering
+### Collision Avoidance and Steering Blending
 
 **What:**  
-The drones combine a primary movement force with separation, map-bounds avoidance, and wall avoidance. Ground attackers also use short-range forward avoidance to reduce clustering collisions.
+The drones use blended steering. Their main steering force is combined with local avoidance forces such as separation, wall avoidance, and unsticking behaviour. Ground attackers also use local avoidance so that they do not heavily overlap while moving through Maze 1.
 
 **Where:**  
 - `js/ai/steering/CollisionAvoidSteering.js`
@@ -77,88 +97,77 @@ The drones combine a primary movement force with separation, map-bounds avoidanc
 - `js/entities/GroundAttackers.js`
 
 **How to observe:**  
-In Maze 2, drones avoid piling directly into each other while they patrol or chase. In Maze 1, ground attackers still follow the flow field, but they also apply local push forces when another attacker is directly in front.
+In Maze 2, drones try not to pile into each other or remain stuck at boundaries. In Maze 1, attackers still move toward the shared goal, but local corrections reduce obvious crowding.
 
 **Why used:**  
-The game has multiple active agents in narrow grid spaces. Steering-based avoidance keeps movement readable and prevents the enemies from feeling stuck or artificial.
-
+The game contains multiple moving agents in relatively narrow spaces. For maze 1, only vector path finding was not enough since two ground attackers could collide. So, we used some sort of collsion avoidance. For map2,Pure wander would not work
+because there are obstacles. So, we use steering behaviours like wander, seek, pursue along with
+collsion avoidance to prevent collsion from other drones and wall obstackles.
 ---
 
-## 2. Decision Making (FSM)
+## 2. Decision Making (Finite State Machine)
 
-The drones now use one clear runtime FSM:
+### Active Drone FSM
 
-`Patrol -> Alert -> Chase -> Search -> Return`
+The drones use the following active runtime FSM:
+
+`Patrol -> Alert -> Chase -> Search -> Patrol`
 
 **Where:**  
-- `js/ai/decisions/state-machines/DroneStates.js`
+- `js/ai/decisions/state-machines/PatrolState.js`
+- `js/ai/decisions/state-machines/AlertState.js`
+- `js/ai/decisions/state-machines/ChaseState.js`
+- `js/ai/decisions/state-machines/SearchState.js`
 - `js/ai/decisions/state-machines/State.js`
 - `js/ai/decisions/state-machines/StateMachine.js`
 - `js/entities/DroneEnemy.js`
+- `js/entities/DroneEntity.js`
 - `js/gameLogic/game.js`
 
-**How transitions work:**  
-- `PatrolState`: the drone wanders around its home area.
-- `AlertState`: when the player is detected, the drone briefly pauses and prepares to engage.
+**How the states work:**
+- `PatrolState`: the drone wanders around Maze 2.
+- `AlertState`: once the player is detected, the drone reacts and prepares to engage.
 - `ChaseState`: the drone actively pursues the player and becomes dangerous.
-- `SearchState`: if the player is lost, the drone moves toward the last known player position and searches for a short time.
-- `ReturnState`: if search fails, the drone heads back home and resumes patrol.
+- `SearchState`: if the player is lost, the drone searches around the last known player location.
+- After search ends, the drone returns to `PatrolState`.
 
-The active runtime initialization and reset are handled in `js/entities/DroneEnemy.js`, which now starts drones in `PatrolState` and resets them back to `PatrolState` as well. `js/gameLogic/game.js` also treats drones as dangerous only in `ChaseState`, which keeps the runtime behavior consistent with the FSM story.
 
 **How to observe:**  
-In Maze 2, approach a drone to trigger detection. It will move from patrol into alert, then chase. If you break distance, it transitions into search and then eventually returns to its patrol area.
+In Maze 2, approach a drone. It will move from patrol to alert, then to chase. If the drone loses the player, it enters search and eventually resumes patrol.
 
 **Why this FSM design was chosen:**  
-This class-based FSM is easy to explain, easy to grade, and fits the course style better than embedding decisions directly in `World.js`. It also follows the course design pattern more closely, which makes the runtime behavior easier to debug and evaluate. It also creates clearer gameplay than a simple two-state enemy because the drone visibly reacts in stages instead of instantly toggling between idle and attack.
+A class-based FSM is easy to match with professor's implementation because the states, transitions, and responsibilities are clearly separated. It is also easier to debug than placing all decision logic inside one large update method.
+
+**Gameplay consequence:**  
+In `js/gameLogic/game.js`, drones are only treated as dangerous during `ChaseState`. This makes the win/loss logic consistent with the FSM design.
 
 ---
 
 ## 3. Pathfinding
 
-### Hierarchical A*
-
-**What:**  
-Hierarchical A* is the main pathfinding system for drones in Maze 2. The maze is divided into clusters, portals are created between neighboring clusters, and the drone first plans a high-level route through clusters before refining each segment with low-level A*.
-
-**Where:**  
-- `js/ai/pathfinding/HierarchicalAStar.js`
-- `js/ai/pathfinding/ClusterGraph.js`
-- `js/entities/DroneEnemy.js`
-- `js/ai/decisions/state-machines/DroneStates.js`
-- `js/gameLogic/WorldInitializerManager.js`
-
-**How used:**  
-The pathfinder is created during world initialization for Maze 2. During `ChaseState`, `SearchState`, and `ReturnState`, the drone asks for a hierarchical path and then follows that path using steering.
-
-**Why chosen:**  
-Maze 2 is larger than the first maze and is the most navigation-heavy part of the project. HPA* makes the drone pathfinding easier to scale and easier to justify than recomputing a full flat search every time the target changes.
-
-**Simplifications / modifications:**  
-This is a simplified course-style HPA* implementation. The cluster graph keeps one selected portal per entrance region instead of building a more complex abstract graph with many transition nodes. That keeps the implementation explainable while still showing the hierarchical idea clearly.
-
 ### Jump Point Search (JPS)
 
 **What:**  
-Jump Point Search is used to generate efficient grid paths between anchor tiles in the dungeon. Those segments are combined into the patrol loop that the dungeon guard follows.
+Jump Point Search is used in the dungeon to generate efficient path segments between selected anchor tiles. These segments are combined into the patrol loop used by the dungeon guard( yellow lines in dungeon).
 
 **Where:**  
 - `js/ai/pathfinding/JPS.js`
 - `js/entities/DungeonGuard.js`
 
 **How used:**  
-When the dungeon is created, the guard manager chooses anchor tiles near the dungeon corners. JPS computes the path between each pair of anchors, and the resulting segments are merged into one patrol loop.
+When the dungeon is created, anchor tiles are selected near the dungeon corners. JPS computes paths between successive anchors, and the combined result becomes the guard’s patrol loop.
 
 **Why chosen:**  
-JPS is a good fit for uniform-cost grid movement in the dungeon. It reduces unnecessary exploration compared with a plain A* search and gives a clean example of a course pathfinding topic being used for a real gameplay task.
+JPS is a strong match for uniform-cost grid maps. This project provides a clear pathfinding component for the dungeon while keeping the guard patrol efficient and easy to explain. 
 
-**Simplifications / modifications:**  
-The project uses JPS for patrol-loop construction rather than for the main chase behavior. This is still meaningful, but it is narrower than using JPS for all live enemy pursuit.
+**Modification in this project:**
+
+JPS is used for patrol-loop construction rather than live chase pathfinding. This is still a valid application because it directly supports runtime guard behaviour.Moreover, we used priority queue as shown in class. Using A*, HP A* would make things more complecated. In this use case, we found JPS is the best fit.
 
 ### Flow-Field Navigation
 
 **What:**  
-Flow-field navigation is the movement system for the ground attackers in Maze 1. A reverse Dijkstra pass builds a cost field outward from the goal tile, then each walkable tile stores a downhill direction toward a lower-cost neighbor. The attackers move according to that stored direction.
+Flow-field navigation is used by the ground attackers in Maze 1. A reverse cost-field computation is built from the exit doorway, and each walkable tile stores a downhill direction toward a lower-cost neighbour.(Not including in Grading Criteria..Should be considered for creativity)
 
 **Where:**  
 - `js/ai/pathfinding/vectorPathFinding.js`
@@ -167,43 +176,57 @@ Flow-field navigation is the movement system for the ground attackers in Maze 1.
 - `js/gameLogic/WorldInitializerManager.js`
 
 **How used:**  
-The cost field is built once using the Maze 1 doorway as the goal. Each attacker reads the flow direction on its current tile, resolves the next downhill tile, and moves toward that tile center.
+The field is built once from the Maze 1 goal tile. Each ground attacker checks the current tile, finds the next downhill direction, and moves toward the centre of the next selected tile.
 
 **Why chosen:**  
-Flow fields are a strong choice for groups of agents that all share the same destination. The ground attackers do not need individually optimal paths as much as they need coordinated pressure toward the same exit corridor.
+Flow fields are especially suitable when many agents share the same destination. That is the case in Maze 1, where all attackers pressure the player by moving toward the same goal area.
 
-**Simplifications / modifications:**  
-The current version intentionally uses a clean tile-to-tile downhill direction instead of a more blended vector field. That makes the algorithm easier to explain: reverse Dijkstra computes the costs, every tile points downhill, and movement follows that downhill choice consistently. In the current branch, the movement logic directly follows the generated downhill field, so the path computation and runtime behavior use the same representation.
+**Modification in this project:**  
+The current version stores a discrete one-step downhill direction rather than a more continuous blended vector field. This makes the algorithm more transparent and easier to defend in a report.
 
 ---
 
 ## 4. Procedural Content Generation (PCG)
 
-**The environment is not static — each run generates a new layout using procedural generation.**
+The environment is procedurally generated rather than fixed. Every new restart will give new look to the world.
 
 ### DFS Maze Generation
 
 **What:**  
-The first two maze spaces are generated with a depth-first search backtracking maze generator.
+Maze 1 is created using the maze-generation option in `TileMap`, and the maze generator uses depth-first search backtracking to carve passages.
 
 **Where:**  
 - `js/pcg/MazeGenerator.js`
 - `js/maps/TileMap.js`
 - `js/gameLogic/WorldInitializerManager.js`
 
-**How:**  
-`MazeGenerator.generate()` starts from a random walkable tile, recursively visits neighbors, and carves passages by removing walls between tiles.
-
 **How to observe:**  
-Restart the game several times. The internal layout of Maze 1 and Maze 2 changes across runs.
+Restart the game multiple times. The layout of Maze 1 changes across runs.
 
 **Why chosen:**  
-DFS backtracking is one of the clearest course-aligned ways to generate traversable mazes. It produces strong directional maze structure and is easy to connect to the pathfinding and enemy systems.
+DFS backtracking is a clear and standard procedural maze-generation algorithm. It reliably creates connected maze layouts and is easy to explain( since professor provided the code and told us we are
+free to use that. He just wants to see we can implement in real life).
+
+### Perlin-Based Terrain for Maze 2
+
+**What:**  
+The second area is not generated as another strict DFS maze. Instead, it is configured in `WorldInitializerManager` using Perlin-based terrain parameters, creating a more open map with different terrain types.
+
+**Where:**  
+- `js/pcg/Perlin.js`
+- `js/maps/TileMap.js`
+- `js/gameLogic/WorldInitializerManager.js`
+
+**How to observe:**  
+Maze 2 has a more open structure than Maze 1, which supports drone wandering and detection behaviour more naturally.
+
+**Why chosen:**  
+This design gives the second stage a different spatial identity. It also supports the drone FSM better than a narrow maze would.
 
 ### BSP Dungeon Generation
 
 **What:**  
-The final dungeon is generated separately using binary space partitioning.
+The final dungeon is created using binary space partitioning.
 
 **Where:**  
 - `js/pcg/DungeonGenerator.js`
@@ -211,189 +234,177 @@ The final dungeon is generated separately using binary space partitioning.
 - `js/pcg/Room.js`
 - `js/gameLogic/WorldInitializerManager.js`
 
-**How:**  
-The dungeon space is split into partitions, rooms are created inside leaf partitions, and corridors connect rooms by carving through the grid.
-
 **How to observe:**  
-Restart the game several times and compare the final dungeon layout. Room sizes, placement, and corridor structure vary between runs.
+Restart the game several times and compare the final dungeon layout. The room arrangement and corridors vary.
 
 **Why chosen:**  
-The dungeon needed a different feel from the mazes. BSP produces room-and-corridor layouts that are better for the final controller-room area and for the guard patrol loop.
+The dungeon needed a room-and-corridor structure rather than another maze. BSP is well suited for producing that kind of final level.
 
 ---
 
 ## 5. Additional Topic
 
-### Flow-Field Navigation
+### Energy-Cell Gating as a Progression Mechanic
 
 **What:**  
-Flow-field navigation is the project’s additional topic. It is a navigation method where one global cost field is built for a shared target, and each tile stores the next downhill direction agents should follow.
+The project includes a collection-based progression system through energy cells and a controller-room unlock condition.
 
 **Where:**  
-- `js/ai/pathfinding/vectorPathFinding.js`
-- `js/entities/GroundAttackers.js`
+- `js/gameLogic/EnergyCellManager.js`
+- `js/gameLogic/ControllerExitManager.js`
+- `js/World.js`
 
-**How enemies use it:**  
-The ground attackers in Maze 1 all use the same field toward the maze doorway. This gives them coordinated movement without running a separate search for each attacker on every update.
+**How it works:**  
+Energy cells are distributed across Maze 1, Maze 2, and the dungeon. The controller exit remains locked until the required fraction of total cells has been collected.
 
-**Why chosen:**  
-It adds a different style of navigation from HPA* and JPS. That gives the project broader AI coverage and makes Maze 1 feel different from the drone and dungeon spaces.
-
----
-
-# Changes from Original Proposal
-
-The final version is more focused on using different AI stacks in different parts of the map instead of forcing one algorithm everywhere.
-
-Main changes:
-- Drone navigation moved toward a clearer hierarchical pathfinding setup in Maze 2 using HPA*.
-- Ground enemies use flow-field navigation instead of individual path searches so they behave like a coordinated pressure system in Maze 1.
-- The drone behavior is now centered on a cleaner class-based FSM with patrol, alert, chase, search, and return states.
-- The dungeon guard uses JPS to build a patrol loop and Reynolds Path Following to move along it, which gives the dungeon its own distinct AI identity.
-- The final layout became a mixed PCG structure: two DFS mazes followed by a BSP-generated dungeon.
-
-These changes improved both the gameplay and the requirement coverage. Instead of repeating one enemy pattern across the whole game, each space now demonstrates a different AI topic in a visible way.
+**Why included:**  
+This mechanic strengthens the structure of the game by connecting navigation, survival, and exploration into one clear objective. It also prevents the project from feeling like a simple start-to-end movement demo.
 
 ---
 
-# Algorithm Modifications
+# Description of Each Area
 
-### Reynolds
-- The implementation in `js/ai/steering/ReynoldsPathFollowing.js` follows the lecture idea directly, but adapts it to a looped path instead of a one-pass path.
-- It also uses segment switching thresholds and a small forward steering force when the guard is already near the path.
-- These changes improve patrol continuity and reduce jitter in a real-time game.
+## Maze 1
+Maze 1 is the opening pressure zone. It is more maze-like in structure, and the main AI feature is the group behaviour of ground attackers. These enemies repeatedly use the shared flow field built toward the map exit, which creates coordinated pressure.
 
-### HPA*
-- `js/ai/pathfinding/HierarchicalAStar.js` uses a simplified cluster-and-portal approach.
-- `js/ai/pathfinding/ClusterGraph.js` chooses a representative portal for each entrance region instead of keeping a dense abstract graph.
-- This makes the implementation smaller and easier to explain while still demonstrating hierarchical search.
+## Maze 2
+Maze 2 is the drone zone. Its more open terrain supports wandering, detection, alerting, pursuit, and local search. Safe tiles are also added here through the layout manager to soften the difficulty and support evasion.
 
-### JPS
-- `js/ai/pathfinding/JPS.js` is used for building the dungeon patrol loop rather than all runtime pursuit behavior.
-- This is a narrower use than a full JPS-driven chase enemy, but it still demonstrates the algorithm clearly in the final level setup.
+## Dungeon
+The dungeon is the final objective area. It uses BSP generation and contains the controller exit. The dungeon guard patrols on a loop built from JPS path segments and moves using Reynolds Path Following until the player enters detection range.
 
-### Flow-Field
-- `js/ai/pathfinding/vectorPathFinding.js` uses reverse Dijkstra to build the cost field, then stores a one-step downhill direction on each walkable tile.
-- The movement code now follows that same representation directly by moving toward the next downhill tile center.
-- This is a deliberate simplification for clarity and consistency. It is easier to defend than a blended vector output that is harder to interpret at runtime.
+---
 
-### FSM
-- The project keeps the class-based FSM structure in `js/ai/decisions/state-machines`, but the final runtime path has been cleaned up so drones actively use `Patrol -> Alert -> Chase -> Search -> Return`.
-- This was done to remove ambiguity between older and newer state systems and make the runtime behavior match the architecture description.
+
+# Algorithm Modifications and Practical Adaptations
+
+### Reynolds Path Following
+- adapted for a looped patrol path rather than a one-directional path,
+- used together with live chase switching when the player enters detection range,
+- tuned for smoother movement in a real-time game environment.
+
+### Jump Point Search
+- used to connect anchor tiles into a patrol loop,
+- serves a practical gameplay purpose rather than being included only as a standalone demonstration.
+
+### Flow-Field Navigation
+- implemented using reverse cost propagation and downhill tile selection,
+- simplified to a discrete tile-to-tile guidance system for clarity and consistency.
+
+### Drone FSM
+- kept as a modular class-based system,
+- dangerous drone behaviour is restricted to `ChaseState`,
+- final implemented transition sequence is simpler and exactly matches the class style.
 
 ---
 
 # Architecture Overview
 
-- `js/World.js` acts as the top-level world object and orchestration layer. It owns shared world state and delegates setup, updates, collisions, resets, and controller-exit logic to managers.
-- `js/gameLogic/WorldInitializerManager.js`, `js/gameLogic/WorldUpdateManager.js`, `js/gameLogic/WorldCollisionManager.js`, and `js/gameLogic/WorldResetManager.js` handle the main world management tasks.
-- `js/entities` contains entity-specific behavior such as drones, ground attackers, the dungeon guard, the player, and collectibles.
-- `js/ai/decisions` contains FSM logic.
-- `js/ai/steering` contains steering behaviors and movement support.
-- `js/ai/pathfinding` contains the navigation systems: HPA*, JPS, Dijkstra, and flow-field support.
-- `js/maps` and `js/pcg` contain map structures and procedural generation systems.
+The codebase is organised into clear subsystems.
 
-This keeps the project closer to the course style than putting all AI and gameplay decisions directly in `World.js`.
+- `js/World.js` is the top-level orchestration class.
+- `js/gameLogic/WorldInitializerManager.js` builds the maps, entities, hallways, objectives, and managers.
+- `js/gameLogic/WorldUpdateManager.js` runs the frame-by-frame update process.
+- `js/gameLogic/WorldCollisionManager.js` selects the correct collision map and handles area-specific collision logic.
+- `js/gameLogic/WorldResetManager.js` clears the world and prepares it for a fresh restart.
+- `js/gameLogic/ControllerExitManager.js` manages the final objective and unlocking state.
+- `js/gameLogic/EnergyCellManager.js` manages collectible placement and collection.
+- `js/entities/` contains the player, drones, guard, attackers, and collectible entities.
+- `js/ai/decisions/state-machines/` contains the finite state machine implementation.
+- `js/ai/steering/` contains steering behaviours and path-following logic.
+- `js/ai/pathfinding/` contains the implemented navigation algorithms.
+- `js/pcg/` contains procedural generation systems.
+
+This organisation is appropriate for an academic submission because it separates world management, AI, procedural generation, and gameplay systems.
 
 ---
 
 # Key Files Guide
 
-- `js/entities/DroneEnemy.js`  
-  Runtime drone behavior, hierarchical path usage, blended steering, and FSM initialization/reset.
-
-- `js/entities/DungeonGuard.js`  
-  Builds the dungeon patrol loop with JPS and updates the guard with Reynolds Path Following or pursuit.
-
-- `js/entities/GroundAttackers.js`  
-  Spawns and updates Maze 1 attackers that follow the flow field and apply local collision pressure.
-
-- `js/ai/decisions/state-machines/DroneStates.js`  
-  Class-based drone FSM with Patrol, Alert, Chase, Search, and Return.
-
-- `js/ai/steering/ReynoldsPathFollowing.js`  
-  Reynolds path following used for the dungeon guard loop.
-
-- `js/ai/steering/SteeringBehaviours.js`  
-  Shared steering behaviors including seek, arrive, pursue, and wander.
-
-- `js/ai/steering/CollisionAvoidSteering.js`  
-  Steering support for obstacle and boundary avoidance.
-
-- `js/ai/pathfinding/HierarchicalAStar.js`  
-  High-level cluster-based drone pathfinding.
-
-- `js/ai/pathfinding/ClusterGraph.js`  
-  Cluster and portal abstraction used by HPA*.
-
-- `js/ai/pathfinding/JPS.js`  
-  Jump Point Search for the dungeon patrol loop.
-
-- `js/ai/pathfinding/vectorPathFinding.js`  
-  Reverse Dijkstra cost field plus downhill flow-field following.
-
-- `js/pcg/MazeGenerator.js`  
-  DFS maze generation for Maze 1 and Maze 2.
-
-- `js/pcg/DungeonGenerator.js`  
-  BSP room-and-corridor generation for the final dungeon.
+- `js/World.js`  
+  Top-level world state, shared configuration, and wrapper methods.
 
 - `js/gameLogic/WorldInitializerManager.js`  
-  Main world setup, map creation, AI system setup, enemy spawning, and energy-cell placement.
+  Creates the three connected areas, hallways, pathfinding support, enemy managers, and collectibles.
 
----
+- `js/gameLogic/WorldUpdateManager.js`  
+  Updates the player, enemies, animations, collectibles, and controller exit every frame.
 
-# Creative Additions
+- `js/gameLogic/game.js`  
+  Handles win/loss logic and restart behaviour.
 
-### Multiple Enemy Types
-The game uses three different enemy roles: ground attackers, drones, and a dungeon guard. This improves gameplay by making each area feel mechanically different instead of repeating one enemy across the whole project.
+- `js/entities/DroneEnemy.js`  
+  Drone steering, FSM integration, detection, search memory, and visual state control.
 
-### Energy Cell System
-Energy cells are distributed across all three areas through `js/gameLogic/EnergyCellManager.js`. This gives the player a collection objective beyond simple movement from start to end.
+- `js/entities/DroneEntity.js`  
+  Drone creation, spawn handling, model loading, and per-frame drone manager update logic.
 
-### Controller Room Objective
-The final goal is not just reaching the last map. The player must unlock and activate the controller room exit managed by `js/gameLogic/ControllerExitManager.js`. This gives the dungeon a clear objective state instead of functioning as a generic end zone.
+- `js/entities/GroundAttackers.js`  
+  Ground attacker spawning, visual setup, and flow-field-based movement updates.
 
-### 80% Unlock Requirement
-The controller exit unlocks only after collecting 80% of all spawned energy cells. This improves pacing because the player cannot ignore most of the world and run straight to the end.
+- `js/entities/DungeonGuard.js`  
+  Dungeon guard patrol-loop creation, patrol update, and chase switching.
 
-### Combined AI Systems
-The project combines flow fields, HPA*, JPS, Reynolds path following, steering, and FSMs in one game. This improves gameplay variety and also makes the project stronger as a course submission because each area demonstrates a different AI idea in a visible way.
+- `js/ai/pathfinding/vectorPathFinding.js`  
+  Builds the Maze 1 flow field and supports attacker navigation.
+
+- `js/ai/pathfinding/JPS.js`  
+  Jump Point Search is used for dungeon patrol path generation.
+
+- `js/ai/steering/ReynoldsPathFollowing.js`  
+  Smooth loop-following movement for the dungeon guard.
+
+- `js/ai/decisions/state-machines/`  
+  Active drone FSM state definitions and state machine infrastructure.
+
+- `js/pcg/MazeGenerator.js`, `js/pcg/Perlin.js`, `js/pcg/DungeonGenerator.js`  
+  Procedural generation systems for the different world areas.
 
 ---
 
 # Quick Testing Guide
 
-### Verify FSM transitions
-Go into Maze 2 and approach a drone. Watch it patrol first, then enter alert, then chase. Break distance and keep moving away to see search and return behavior.
+## Verify the drone FSM
+Go to Maze 2 and approach a drone. Observe patrol first, then alert, then chase. Move away until the drone loses you and enters search before returning to patrol.
 
-### Verify flow-field movement
-Start in Maze 1 and watch the ground attackers. They should all move toward the same doorway using the shared field, while still adjusting locally when another attacker is directly in front of them.
+## Verify drone danger logic
+Touch a drone in patrol or alert and note that it should not trigger defeat immediately. During `ChaseState`, collision with the drone should cause game over.
 
-### Verify Reynolds Path Following
-Reach the dungeon and watch the guard before entering its detection radius. It should patrol a smooth loop rather than jumping between discrete patrol points.
+## Verify flow-field navigation
+In Maze 1, watch several ground attackers. They should generally move toward the same doorway while still showing local avoidance corrections.
 
-### Verify JPS usage
-Restart a few times and reach the dungeon. The patrol loop will be rebuilt from new dungeon geometry, using JPS segments between anchor points.
+## Verify dungeon patrol
+Reach the dungeon and observe the guard before entering its detection radius. The patrol should follow a visible loop.
 
-### Verify HPA*
-In Maze 2, let a drone begin chasing from a distance. Its movement should still work across the maze rather than behaving like only local steering.
+## Verify procedural generation
+Restart the game several times. The first maze and the dungeon should visibly change. Maze 2 should still retain its open terrain style with varied tile structure.
 
-### Verify PCG changes
-Restart the game multiple times. Maze 1, Maze 2, and the dungeon should all generate new layouts.
+## Verify unlock condition
+Collect energy cells across the three areas. The controller exit should only unlock after the required number has been reached.
 
-### Verify unlock logic
-Collect energy cells across the maps and check the controller room state in the dungeon. The exit should unlock only after the required number of cells has been collected.
-
-### Verify win and restart
-After unlocking the controller room, enter the exit to win. Press `R` on the win or game-over screen to restart the full run.
+## Verify restart
+After a win or loss, press `R` and confirm that the world is rebuilt from scratch.
 
 ---
 
-# Notes for Grader
+# Notes for Grading
+ - Perfect Code Structure as we have done in class(w3 Style)
+- The project demonstrates multiple AI topics in one connected game, which is fun and engaging.
+- The strongest directly observable course topics  are:
+  - finite state machines(class based as shown in class),
+  - steering and avoidance(wander,seek,pursue and whisker base collision avoidance),
+  - Reynold's Path Following,
+  - Jump Point Search,
+  - procedural generation(map1-directly used professor's code)(I mean the maze generator).
+- The dungeon guard combines path generation and steering-based movement in a way that looks cute.
+- The energy-cell unlock system improves the overall structure of the game by tying exploration to the win condition.
 
-- The game is designed around three connected AI spaces rather than one repeated behavior. Maze 1 emphasizes flow-field group movement, Maze 2 emphasizes FSM plus HPA*, and the dungeon emphasizes JPS plus Reynolds path following.
-- Drone danger is intentionally restricted to `ChaseState` so the runtime gameplay matches the FSM explanation cleanly.
-- JPS is used for patrol-loop construction instead of live chase behavior. This is still a real use of the algorithm, but it is not the only navigation method in the project.
-- The HPA* implementation is a simplified educational version using clusters and representative portals. It is intended to be clear and defensible rather than fully optimized.
-- There are older state-machine files in the repository from earlier iterations, but the active runtime drone logic on this branch uses `DroneStates.js`.
+---
+
+# Conclusion
+
+Robot Maze Escape is a multi-area AI game that combines procedural level generation, enemy decision making, steering-based movement, group navigation, and an objective-driven progression system. The final implementation is strongest when described area by area: Maze 1 for coordinated flow-field pressure, Maze 2 for drone FSM behaviour, and the dungeon for JPS-based patrol generation with Reynolds Path Following. 
+
+# Further Direction
+
+We can make multiple level by tuning the map creation parameter in world init or by adding more energy cells. Add more AI enemies in future..
