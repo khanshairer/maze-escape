@@ -7,6 +7,7 @@ Robot Maze Escape is a three-stage AI game built with three.js. The player trave
 
 # YouTube Demo Video
 - Link: [https://youtu.be/S_kUdUqbpb0]
+  The video shows the full gameplay flow, including maze navigation, enemy behavior, energy-cell collection, and the final controller room objective.
 
 ---
 
@@ -31,6 +32,26 @@ Robot Maze Escape is a three-stage AI game built with three.js. The player trave
 
 ---
 
+# How to Play
+
+Move through the world with `W`, `A`, `S`, and `D`. Movement is relative to the camera, so the player moves in the direction the camera is facing. Press `Space` to jump when you need extra movement control.
+
+The main objective is to collect energy cells, unlock the controller room, and escape through the final exit. The controller room unlocks after collecting 80% of the spawned energy cells (turns green when unlocked), so the player needs to explore the world instead of rushing straight to the end.
+
+In Maze 1, the ground attackers follow a shared flow field toward the exit corridor. They create continuous pressure by moving toward the same goal area, and the player must avoid contact with them.
+
+In Maze 2, drones use a finite state machine: patrol, alert, chase, search, and return. Green safe tiles prevent drone detection and interrupt ongoing alert or chase behavior. Green tiles are visually distinct in the maze and indicate safe zones where drones cannot detect or chase the player. When the player leaves a safe tile, the drones resume normal detection behavior.
+
+The drone visual system helps show the current state. Blue/cyan means patrol, yellow/orange means alert or search, red means chase and danger, and white/cyan means return. The detection circle color is tied to the active FSM state.
+
+In the dungeon, the guard patrols a loop using Reynolds Path Following and can chase the player when the player gets too close. The final goal is to reach the controller room exit after it has been unlocked.
+
+The game ends in two ways:
+- **Loss:** the player is caught by a ground attacker, a drone in its dangerous chase state, or the dungeon guard.
+- **Win:** the player reaches the controller exit after the required number of energy cells(80% for this version) has been collected.
+
+---
+
 # Project Overview
 
 The game is organised as a connected three-area progression:
@@ -48,20 +69,6 @@ A major design goal of the project is to give each area a different AI identity:
 - **The dungeon** uses Jump Point Search to build a patrol loop and Reynolds Path Following to move the guard smoothly along that loop.
 
 This separation makes the game easier to explain academically and also makes the gameplay more varied.
-
----
-
-# Main Gameplay Objective
-
-The player must:
-1. survive enemy pressure across all three areas,
-2. collect energy cells distributed throughout the world,
-3. unlock the controller exit in the dungeon,
-4. reach the unlocked controller room to win.
-
-The game ends in two ways:
-- **Loss:** the player is caught by a ground attacker, a drone in its dangerous chase state, or the dungeon guard.
-- **Win:** the player reaches the controller exit after the required number of energy cells(80% for this version) has been collected.
 
 ---
 
@@ -99,10 +106,11 @@ The drones use blended steering. Their main steering force is combined with loca
 **How to observe:**  
 In Maze 2, drones try not to pile into each other or remain stuck at boundaries. In Maze 1, attackers still move toward the shared goal, but local corrections reduce obvious crowding.
 
-**Why used:**  
+**Why used:**
 The game contains multiple moving agents in relatively narrow spaces. For maze 1, only vector path finding was not enough since two ground attackers could collide. So, we used some sort of collsion avoidance. For map2,Pure wander would not work
 because there are obstacles. So, we use steering behaviours like wander, seek, pursue along with
 collsion avoidance to prevent collsion from other drones and wall obstackles.
+
 ---
 
 ## 2. Decision Making (Finite State Machine)
@@ -408,3 +416,34 @@ Robot Maze Escape is a multi-area AI game that combines procedural level generat
 # Further Direction
 
 We can make multiple level by tuning the map creation parameter in world init or by adding more energy cells. Add more AI enemies in future..
+
+---
+
+# Contributors
+
+Mamun Rashid  
+- Drone FSM implementation and cleanup
+- Flow-field logic cleanup and consistency fixes
+- Hierarchical pathfinding integration
+- Final debugging and gameplay fixes
+- README writing and polishing
+
+Shahrier Khan  
+- Initial world and manager architecture refactor
+- Ground attacker system
+- Dungeon guard system, including Reynolds and JPS integration
+- Procedural generation systems for maze and dungeon layouts
+- Base gameplay structure
+
+---
+
+# References
+
+AI Assistance  
+- ChatGPT (OpenAI)
+
+Used for:
+- Debugging assistance
+- Algorithm clarification
+- Code cleanup guidance
+- README structure and polishing
