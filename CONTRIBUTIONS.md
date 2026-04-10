@@ -17,7 +17,6 @@ This was a collaborative project where both team members contributed to design, 
 - Drone AI system using the class-based FSM with Patrol, Alert, Chase, Search, and Return states
 - Drone behavior fixes and debugging, including safe-tile logic, chase behavior, and coordinate-space fixes
 - Flow-field logic cleanup and consistency fixes
-- Hierarchical pathfinding (HPA*) integration and adjustments for drone navigation
 - Final debugging and gameplay behavior fixes
 - README writing, refinement, and alignment with project requirements
 
