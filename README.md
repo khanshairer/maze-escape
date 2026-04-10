@@ -6,7 +6,9 @@ Robot Maze Escape is a three-stage AI game built with three.js. The player cross
 ---
 
 # YouTube Demo Video
+
 - Link: [https://youtu.be/m4wiBuLuVY8]
+  The video shows the full gameplay flow, including maze navigation, enemy behavior, energy-cell collection, and the final controller room objective.
 
 ---
 
@@ -27,6 +29,22 @@ Robot Maze Escape is a three-stage AI game built with three.js. The player cross
 - `W`, `A`, `S`, `D` move the player relative to the camera.
 - `Space` jumps.
 - `R` restarts after a loss or a win.
+
+---
+
+# How to Play
+
+Move through the world with `W`, `A`, `S`, and `D`. Movement is relative to the camera, so the player moves in the direction the camera is facing. Press `Space` to jump when you need extra movement control.
+
+The main objective is to collect energy cells, unlock the controller room, and escape through the final exit. The controller room unlocks after collecting 80% of the spawned energy cells, so the player needs to explore the world instead of rushing straight to the end.
+
+In Maze 1, the ground attackers follow a shared flow field toward the exit corridor. They create continuous pressure by moving toward the same goal area, and the player must avoid contact with them.
+
+In Maze 2, drones use a finite state machine: patrol, alert, chase, search, and return. Green safe tiles prevent drone detection and interrupt ongoing alert or chase behavior. Green tiles are visually distinct in the maze and indicate safe zones where drones cannot detect or chase the player. When the player leaves a safe tile, the drones resume normal detection behavior.
+
+The drone visual system helps show the current state. Blue/cyan means patrol, yellow/orange means alert or search, red means chase and danger, and white/cyan means return. The detection circle color is tied to the active FSM state.
+
+In the dungeon, the guard patrols a loop using Reynolds Path Following and can chase the player when the player gets too close. The final goal is to reach the controller room exit after it has been unlocked.
 
 ---
 
@@ -98,16 +116,20 @@ The drones now use one clear runtime FSM:
 - `js/gameLogic/game.js`
 
 **How transitions work:**  
-- `PatrolState`: the drone wanders around its home area.
-- `AlertState`: when the player is detected, the drone briefly pauses and prepares to engage.
-- `ChaseState`: the drone actively pursues the player and becomes dangerous.
-- `SearchState`: if the player is lost, the drone moves toward the last known player position and searches for a short time.
-- `ReturnState`: if search fails, the drone heads back home and resumes patrol.
+- `PatrolState`: the drone wanders around its home area. It only detects the player when the player is not on a safe tile.
+- `AlertState`: when the player is detected, the drone briefly pauses and prepares to engage. If the player reaches a safe tile, it returns to patrol.
+- `ChaseState`: the drone actively pursues the player and becomes dangerous. If the player reaches a safe tile, the chase is interrupted and the drone returns to patrol.
+- `SearchState`: if the player is lost, the drone moves toward the last known player position and searches for a short time. Search does not reacquire the player while the player is on a safe tile.
+- `ReturnState`: if search fails, the drone heads back home and resumes patrol. Return can reacquire the player only when the player is not on a safe tile.
 
 The active runtime initialization and reset are handled in `js/entities/DroneEnemy.js`, which now starts drones in `PatrolState` and resets them back to `PatrolState` as well. `js/gameLogic/game.js` also treats drones as dangerous only in `ChaseState`, which keeps the runtime behavior consistent with the FSM story.
 
+Drones are only considered dangerous during `ChaseState`, which ensures gameplay behavior matches the FSM design clearly.
+
+The active FSM also drives the drone visual state through `setDetectionCircleColor()` in `js/entities/DroneEnemy.js`: patrol uses blue/cyan, alert uses orange/yellow, chase uses red, search uses a dimmer yellow, and return uses a dimmer cyan/white state.
+
 **How to observe:**  
-In Maze 2, approach a drone to trigger detection. It will move from patrol into alert, then chase. If you break distance, it transitions into search and then eventually returns to its patrol area.
+In Maze 2, approach a drone to trigger detection. It will move from patrol into alert, then chase. If you break distance, it transitions into search and then eventually returns to its patrol area. Standing on a safe tile stops drone detection or interrupts an active alert/chase, and leaving the safe tile allows normal detection behavior to resume. The drone color and detection circle color change with the active FSM state.
 
 **Why this FSM design was chosen:**  
 This class-based FSM is easy to explain, easy to grade, and fits the course style better than embedding decisions directly in `World.js`. It also follows the course design pattern more closely, which makes the runtime behavior easier to debug and evaluate. It also creates clearer gameplay than a simple two-state enemy because the drone visibly reacts in stages instead of instantly toggling between idle and attack.
@@ -129,7 +151,7 @@ Hierarchical A* is the main pathfinding system for drones in Maze 2. The maze is
 - `js/gameLogic/WorldInitializerManager.js`
 
 **How used:**  
-The pathfinder is created during world initialization for Maze 2. During `ChaseState`, `SearchState`, and `ReturnState`, the drone asks for a hierarchical path and then follows that path using steering.
+The pathfinder is created during world initialization for Maze 2. During `ChaseState`, `SearchState`, and `ReturnState`, the drone asks for a hierarchical path and then follows that path using steering. `js/entities/DroneEnemy.js` converts Maze 2 world positions into map-local coordinates before tile quantization, then converts path points back into world coordinates for movement.
 
 **Why chosen:**  
 Maze 2 is larger than the first maze and is the most navigation-heavy part of the project. HPA* makes the drone pathfinding easier to scale and easier to justify than recomputing a full flat search every time the target changes.
@@ -215,7 +237,7 @@ The final dungeon is generated separately using binary space partitioning.
 The dungeon space is split into partitions, rooms are created inside leaf partitions, and corridors connect rooms by carving through the grid.
 
 **How to observe:**  
-Restart the game several times and compare the final dungeon layout. Room sizes, placement, and corridor structure vary between runs.
+Restart the game several times to observe changes in the final dungeon layout. Room sizes, placement, and corridor structure vary between runs.
 
 **Why chosen:**  
 The dungeon needed a different feel from the mazes. BSP produces room-and-corridor layouts that are better for the final controller-room area and for the guard patrol loop.
@@ -266,6 +288,7 @@ These changes improved both the gameplay and the requirement coverage. Instead o
 ### HPA*
 - `js/ai/pathfinding/HierarchicalAStar.js` uses a simplified cluster-and-portal approach.
 - `js/ai/pathfinding/ClusterGraph.js` chooses a representative portal for each entrance region instead of keeping a dense abstract graph.
+- `js/entities/DroneEnemy.js` handles the Maze 2 world-to-map coordinate conversion before HPA* tile quantization, then converts the result back to world-space path points for steering.
 - This makes the implementation smaller and easier to explain while still demonstrating hierarchical search.
 
 ### JPS
@@ -279,6 +302,8 @@ These changes improved both the gameplay and the requirement coverage. Instead o
 
 ### FSM
 - The project keeps the class-based FSM structure in `js/ai/decisions/state-machines`, but the final runtime path has been cleaned up so drones actively use `Patrol -> Alert -> Chase -> Search -> Return`.
+- The active drone FSM now checks `world.isPlayerOnSafeTile()` so safe tiles prevent detection/reacquisition and interrupt alert or chase behavior.
+- State entry also updates the drone color and detection-circle color, making patrol, alert, chase, search, and return easier to see during testing.
 - This was done to remove ambiguity between older and newer state systems and make the runtime behavior match the architecture description.
 
 ---
@@ -365,7 +390,7 @@ The project combines flow fields, HPA*, JPS, Reynolds path following, steering, 
 # Quick Testing Guide
 
 ### Verify FSM transitions
-Go into Maze 2 and approach a drone. Watch it patrol first, then enter alert, then chase. Break distance and keep moving away to see search and return behavior.
+Go into Maze 2 and approach a drone. Watch it patrol first, then enter alert, then chase. Break distance and keep moving away to see search and return behavior. Step onto a safe tile to confirm detection/chase stops, then leave the safe tile to confirm normal detection can resume. The drone color and detection circle should change as the FSM state changes.
 
 ### Verify flow-field movement
 Start in Maze 1 and watch the ground attackers. They should all move toward the same doorway using the shared field, while still adjusting locally when another attacker is directly in front of them.
@@ -377,7 +402,7 @@ Reach the dungeon and watch the guard before entering its detection radius. It s
 Restart a few times and reach the dungeon. The patrol loop will be rebuilt from new dungeon geometry, using JPS segments between anchor points.
 
 ### Verify HPA*
-In Maze 2, let a drone begin chasing from a distance. Its movement should still work across the maze rather than behaving like only local steering.
+In Maze 2, let a drone begin chasing from a distance. Its movement should still work across the maze rather than behaving like only local steering, including across the world-offset Maze 2 layout.
 
 ### Verify PCG changes
 Restart the game multiple times. Maze 1, Maze 2, and the dungeon should all generate new layouts.
@@ -397,3 +422,34 @@ After unlocking the controller room, enter the exit to win. Press `R` on the win
 - JPS is used for patrol-loop construction instead of live chase behavior. This is still a real use of the algorithm, but it is not the only navigation method in the project.
 - The HPA* implementation is a simplified educational version using clusters and representative portals. It is intended to be clear and defensible rather than fully optimized.
 - There are older state-machine files in the repository from earlier iterations, but the active runtime drone logic on this branch uses `DroneStates.js`.
+
+---
+
+# Contributors
+
+Mamun Rashid  
+- Drone FSM implementation and cleanup
+- Flow-field logic cleanup and consistency fixes
+- Hierarchical pathfinding integration
+- Final debugging and gameplay fixes
+- README writing and polishing
+
+Shahrier Khan  
+- Initial world and manager architecture refactor
+- Ground attacker system
+- Dungeon guard system, including Reynolds and JPS integration
+- Procedural generation systems for maze and dungeon layouts
+- Base gameplay structure
+
+---
+
+# References
+
+AI Assistance  
+- ChatGPT (OpenAI)
+
+Used for:
+- Debugging assistance
+- Algorithm clarification
+- Code cleanup guidance
+- README structure and polishing
