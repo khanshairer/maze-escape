@@ -415,18 +415,11 @@ We can make multiple level by tuning the map creation parameter in world init or
 # Contributors
 
 Mamun Rashid  
-- Drone FSM implementation and cleanup
-- Flow-field logic cleanup and consistency fixes
-- Hierarchical pathfinding integration
-- Final debugging and gameplay fixes
-- README writing and polishing
 
 Shahrier Khan  
-- Initial world and manager architecture refactor
-- Ground attacker system
-- Dungeon guard system, including Reynolds and JPS integration
-- Procedural generation systems for maze and dungeon layouts
-- Base gameplay structure
+
+Please find the CONTRIBUTIONS.md file for detailed report in project root.
+
 
 ---
 
